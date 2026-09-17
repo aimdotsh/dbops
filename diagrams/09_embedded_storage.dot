@@ -1,0 +1,13 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.45, fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#5B6B7A", fontname="DejaVu Sans", fontsize=9, width=1.45, height=0.65];
+  edge [color="#637083", arrowsize=0.65];
+  agent [label="Agent Snapshot\nevery 30s"];
+  mem [label="Memory Latest\n+ Ring Buffer\n30-60min"];
+  alert [label="Alert Engine"];
+  five [label="metrics.db\n5m Snapshot\n30d"];
+  hour [label="1h Rollup\n180d"];
+  day [label="1d Rollup\n730d"];
+  meta [label="dbops.db\nAlert Events"];
+  agent -> mem; mem -> alert; mem -> five; five -> hour; hour -> day; alert -> meta;
+}
