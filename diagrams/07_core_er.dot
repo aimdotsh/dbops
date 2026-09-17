@@ -1,0 +1,18 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.65, fontname="DejaVu Sans"];
+  node [shape=record, style="filled", fillcolor="#F7F9FC", color="#5B6B7A", fontname="DejaVu Sans", fontsize=9];
+  edge [color="#7A8796", arrowsize=0.6];
+  hosts [label="{hosts|id|hostname|ip_address}"];
+  agents [label="{agents|id|host_id|agent_uuid}"];
+  dbs [label="{database_instances|id|host_id|db_type|cluster_id}"];
+  clusters [label="{database_clusters|id|db_type|cluster_type}"];
+  tasks [label="{tasks|id|status|agent_id|lease_*}"];
+  steps [label="{task_steps|task_id|step_code|status}"];
+  locks [label="{resource_locks|lock_key|owner_task_id|lease_expires_at}"];
+  backups [label="{backup_jobs|task_id|instance_id|status}"];
+  archives [label="{archive_jobs|task_id|policy_id|status}"];
+  alerts [label="{alert_events|fingerprint|status|severity}"];
+  audits [label="{audit_logs|user_id|action|task_id}"];
+  metric [label="{metrics.db|metric_latest|5m|1h|1d}", fillcolor="#FFF7E6"];
+  hosts -> agents; hosts -> dbs; clusters -> dbs; tasks -> steps; tasks -> locks; tasks -> backups; tasks -> archives; tasks -> audits; dbs -> backups; dbs -> archives; dbs -> alerts; dbs -> metric [style=dashed];
+}
