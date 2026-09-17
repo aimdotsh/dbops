@@ -1,0 +1,482 @@
+
+### 26.2 主机详情
+
+Tab：概览 / 磁盘 / 数据库实例 / Agent / 任务 / 监控。若主机无 MySQL，可显示“安装 MySQL”入口。
+
+### 26.3 MySQL 安装向导
+
+1. 主机与版本。
+2. 端口与目录。
+3. 参数模板。
+4. 账号策略。
+5. PreCheck 报告。
+6. 配置确认。
+7. 实时安装任务。
+
+### 26.4 MySQL 主从
+
+选择 Primary / Replica -> 兼容检查 -> 初始化方式 -> 确认 -> 实时任务 -> 拓扑页。
+
+### 26.5 归档策略
+
+选择源实例/库/表，平台读取表结构和索引；配置条件、目标、批次和保护阈值；保存前执行 dry-run 风险报告。执行页展示归档行数、删除行数、速度、Lag、负载和暂停原因。
+
+### 26.6 Oracle 表空间
+
+Tablespace 列表 -> 点击进入 Datafile 列表 -> “新增 Datafile”或“扩容”。页面明确展示操作前后磁盘空间预测。
+
+### 26.7 Task 详情
+
+必须显示：总体状态、进度、固定 Steps、实时日志、参数摘要、执行节点、开始/结束、错误码、重试/取消操作。
+
+## 27. RBAC 和高危操作分级
+
+建议风险分级：
+
+- R0：只读。
+- R1：低风险变更，如手工触发备份。
+- R2：中风险，如安装新实例。
+- R3：高风险，如 Restart、Datafile 扩容、创建复制、开始删除型归档。
+- R4：关键，如生产恢复、数据目录清理（V1.0 可限制 SuperAdmin/DBA）。
+
+生产环境 R3/R4 操作至少要求二次确认。V1.1 可增加审批工作流，而不是 V1.0 首期强制实现复杂审批中心。
+
+## 28. 安全设计
+
+1. 全链路 HTTPS。
+2. Agent 主动出站，不暴露远程 Shell。
+3. Action 白名单。
+4. 凭据加密和日志脱敏。
+5. JWT 短 Access Token + Refresh Token；预留 OIDC。
+6. 数据库管理账号最小权限，监控账号与变更账号分离。
+7. 恢复、停止服务、数据清理等高危操作额外授权。
+8. 上传软件包必须 SHA256 校验，可增加签名验证。
+9. Server/Agent 所有文件路径使用允许目录校验，避免 Path Traversal。
+10. `where_template` 不允许直接拼接任意多语句 SQL；使用受限表达式/参数化策略生成最终 where。
+11. Web 不展示完整数据库密码。
+12. Agent 临时 Secret 文件权限 0600，任务完成立即删除。
+
+## 29. 可用性与容灾
+
+V1.0 默认中心端单实例，因此设计目标不是“平台自身零停机”，而是“平台故障不影响数据库业务、中心端能快速恢复、任务不重复破坏性执行”。
+
+### 29.1 中心端故障
+
+- 数据库业务与数据库自身复制不依赖 DBOps Server 存活。
+- Agent 断开 Server 后停止接收新变更任务；正在执行的本地长任务按 Action 的断线策略继续或安全停止。
+- `/data/dbops` 是中心端恢复关键。重建容器后挂载同一目录即可恢复资产与任务事实。
+
+### 29.2 SQLite 备份
+
+不能在运行时简单 `cp dbops.db` 并假设一致。平台内置“平台自身备份”任务，通过 SQLite Online Backup API 或一致性 checkpoint/backup 方法产生：
+
+```text
+platform-backup/YYYYMMDD-HHMM/
+  dbops.db
+  metrics.db            # 可选；历史指标可以不进入高频备份
+  manifest.json
+  sha256.txt
+```
+
+`dbops.db` 建议每日备份并在升级 migration 前强制备份。`metrics.db` 可以按较低等级保护，因为它可从新数据重新积累。
+
+### 29.3 任务恢复
+
+Server/Agent 重启后不自动重复执行未知状态的 R3/R4 Action。通过 Task Lease、Agent Marker、Step Verify 和恢复策略判断是继续、重试还是人工介入。
+
+### 29.4 HA 扩展
+
+未来若明确要求平台自身 HA，再启用 Enterprise Profile：多 Server + PostgreSQL + Redis/分布式锁 + VictoriaMetrics。V1 的领域接口为这一迁移保留兼容层。
+
+## 30. 日志与可观测性
+
+Server/Agent 使用结构化 JSON 日志，字段至少包含 timestamp、level、request_id、task_id、agent_id、action、step_code、message。Secret 字段在 logger 层统一脱敏。
+
+默认日志写：
+
+```text
+/data/dbops/logs/server.log
+/data/dbops/logs/task/<task_id>.log
+Agent: /var/log/dbops-agent/agent.log
+```
+
+启用大小/天数轮转。任务详情页通过 Server Tail/事件流读取当前任务日志，不要求引入 Loki。
+
+平台自身 Dashboard 至少展示 API 错误率、运行任务数、Queued 数、Agent Online 数、SQLite DB 大小、WAL 大小、最近平台备份、Scheduler 延迟和 Metrics Retention 状态。
+
+## 31. 开发接口边界
+
+### 31.1 DatabaseAdapter
+
+```go
+type DatabaseAdapter interface {
+    TestConnection(context.Context) error
+    Status(context.Context) (InstanceStatus, error)
+    CollectMetrics(context.Context) ([]Metric, error)
+}
+```
+
+特有能力拆独立接口，例如：
+
+```go
+type OracleCapacityManager interface {
+    ListTablespaces(context.Context) ([]Tablespace, error)
+    AddDatafile(context.Context, AddDatafileRequest) error
+    ResizeDatafile(context.Context, ResizeDatafileRequest) error
+}
+```
+
+避免把所有数据库能力塞进一个巨大接口。
+
+### 31.2 Reporter
+
+长任务通过 Reporter 上报：
+
+```go
+StepStart(code, name string)
+Progress(percent int, message string)
+Log(level, message string)
+StepSuccess(code string, output any)
+StepFail(code, errorCode string, err error)
+```
+
+## 32. SQLite Migration 与版本管理
+
+`dbops.db` 和 `metrics.db` 都必须通过 Migration 管理，禁止上线后手工修改表结构。Server Binary 内嵌 migration 文件，启动时：
+
+```text
+读取 schema_version
+ -> 检查可升级路径
+ -> 执行升级前平台备份
+ -> BEGIN/执行 migration
+ -> 更新版本
+ -> 启动业务服务
+```
+
+Release 包含：Migration SQL、向后兼容说明、Agent/Server 协议版本、软件仓库兼容矩阵更新。
+
+SQLite Repository 层避免依赖 PostgreSQL 专用 SQL。JSON 字段以 TEXT 保存，业务层统一序列化；时间统一保存 UTC RFC3339 或 Unix Milliseconds。这样未来迁移 PostgreSQL 更容易。
+
+## 33. 部署设计
+
+### 33.1 V1.0 默认部署：一个 Docker
+
+推荐直接运行：
+
+```bash
+docker run -d \
+  --name dbops \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v /data/dbops:/data/dbops \
+  -e DBOPS_MASTER_KEY='replace-with-strong-secret' \
+  dbops/dbops-server:1.0.0
+```
+
+也提供单服务 Compose 示例，见 `config/docker-compose.example.yml`。
+
+镜像内部：
+
+```text
+/usr/local/bin/dbops-server
+/app/migrations/
+/app/defaults/
+# Vue dist 使用 go:embed 编译进入 binary
+```
+
+### 33.2 持久化目录
+
+```text
+/data/dbops/
+  dbops.db
+  metrics.db
+  config/server.yaml
+  logs/
+  software/
+  task-work/
+  platform-backup/
+```
+
+容器更新时只替换镜像，不删除 `/data/dbops`。
+
+### 33.3 Agent 安装
+
+推荐：
+
+```text
+/usr/local/bin/dbops-agent
+/etc/dbops-agent/agent.yaml
+/etc/systemd/system/dbops-agent.service
+/var/lib/dbops-agent/
+/var/log/dbops-agent/
+```
+
+Agent 使用独立低权限 OS 用户；需要 MySQL/Oracle 特权操作时通过最小 sudoers 白名单或数据库软件属主上下文执行，不长期以 root 运行全部逻辑。
+
+### 33.4 反向代理与 HTTPS
+
+容器可以直接监听 8080。生产环境优先复用企业已有 Nginx/Ingress/负载均衡做 TLS；平台自身也预留 `tls.cert/tls.key` 配置。单容器模式不强制再启动一个 Nginx。
+
+### 33.5 Lite 到 Enterprise 的升级路径
+
+```text
+Lite:
+  SQLiteRepository + EmbeddedTaskQueue + SQLiteMetricsStore
+
+Enterprise:
+  PostgreSQLRepository + RedisTaskQueue + VictoriaMetricsStore
+```
+
+迁移工具按 Repository 接口导出/导入资产、任务、策略和审计，不要求修改数据库 Adapter 或 Agent Action 协议。
+
+## 34. 测试策略
+
+### 34.1 单元测试
+
+覆盖参数校验、RBAC、SQLite Repository、Task 状态机、资源锁、Cron/Misfire、告警表达式、Secret 脱敏和 Adapter 逻辑。
+
+### 34.2 SQLite 专项测试
+
+必须包含 WAL 模式、并发读写、busy timeout、进程异常退出、磁盘满、WAL 异常增长、migration 回滚、Online Backup、数百万历史指标行查询和 Retention 删除性能测试。
+
+### 34.3 Task 恢复测试
+
+模拟 Server 在 MySQL 安装、XtraBackup、pt-archiver、Oracle Add Datafile 各步骤被强制 kill。重启后验证不会重复执行破坏性步骤，状态最终可以被 Verify 收敛。
+
+### 34.4 集成测试
+
+使用 Oracle/MySQL/PostgreSQL/Doris 测试环境验证纳管、监控、备份；MySQL 额外验证安装、GTID 主从、归档；Oracle 验证 Datafile Add/Resize。
+
+### 34.5 升级测试
+
+每个正式版本都必须从“上一发布版本的 `/data/dbops` 快照”启动并完成 migration；验证失败必须保持旧数据库可恢复。
+
+### 34.6 安全测试
+
+覆盖 JWT/RBAC 越权、Action 白名单、路径穿越、敏感字段泄漏、恶意参数、压缩包路径、Agent 注册 Token 重放等。
+
+## 35. V1.0 验收标准
+
+### 平台安装与恢复
+
+- 一条 `docker run` 或一个单服务 Compose 可以启动中心端，不要求用户预先安装 PostgreSQL、Redis、Prometheus、Nginx。
+- 首次启动自动创建/migrate `dbops.db` 与 `metrics.db`。
+- 挂载 `/data/dbops` 后容器删除重建，资产、任务、策略和审计数据保持完整。
+- 平台自身备份可以生成可恢复的 SQLite 快照。
+
+### 平台核心
+
+- Host/Agent/Database 可纳管；Agent 断线可告警。
+- 所有变更操作以 Task + Step 执行，日志与审计可追踪。
+- Server 重启后 Queued 任务可继续，未知 Running 任务不会盲目二次执行。
+- 监控实时状态可显示；5m/1h/1d 趋势可查询；Retention 正常。
+
+### MySQL
+
+- Web 一键安装、自动初始化和自动纳管。
+- GTID 主从搭建、拓扑和复制监控可用。
+- XtraBackup / 逻辑备份任务可执行和追踪。
+- pt-archiver PreCheck、执行、负载保护、暂停/恢复、归档结果可审计。
+
+### Oracle
+
+- 纳管、基础监控、Tablespace/Datafile 查询可用。
+- 新增 Datafile 与扩大 Datafile 有 PreCheck、Verify 和审计。
+- RMAN 备份任务可执行和追踪。
+
+### PostgreSQL / Doris
+
+- 基础监控可用。
+- 复制/集群状态可查看。
+- 备份任务可执行和跟踪。
+
+## 36. 开发计划与迭代拆分
+
+### Sprint 0：单容器工程基础
+
+完成 Go Server 骨架、Vue embed 构建、SQLite Repository、Migration、JWT/RBAC、统一错误码、配置加载和 Docker Image。
+
+### Sprint 1：Host + Agent + Durable Task
+
+打通 `Web -> Server -> SQLite Task -> Worker -> Agent -> Event -> Web`，实现资源锁、任务 Lease、重启恢复，先用 `host.info/host.echo` 验证。
+
+### Sprint 2：Embedded Metrics + Alert
+
+完成 Agent Snapshot、内存 Latest、5m/1h/1d Rollup、Retention、Alert Engine、Email/Webhook。
+
+### Sprint 3：MySQL 安装
+
+软件仓库、参数模板、server_id、PreCheck、安装、systemd、自动纳管。
+
+### Sprint 4：MySQL 主从
+
+XtraBackup Adapter、GTID 主从、拓扑、复制监控。
+
+### Sprint 5：Oracle 基础运维
+
+Tablespace、Datafile、Add/Resize、RMAN。
+
+### Sprint 6：统一备份恢复
+
+BackupPolicy/Job/StorageAdapter，MySQL/Oracle/PG/Doris 接入，平台自身 SQLite Backup。
+
+### Sprint 7：MySQL pt-archiver
+
+PreCheck、dry-run、任务、限流、暂停恢复、验证。
+
+### Sprint 8：安全、恢复与验收
+
+审计、Secret 脱敏、Task Crash Recovery、SQLite 压力/迁移测试、安装包和文档。
+
+## 37. 风险清单与设计对策
+
+| 风险 | 后果 | 对策 |
+|---|---|---|
+| SQLite 写竞争 | Task/指标写延迟 | 元数据与指标拆两个 DB、WAL、批量写、单写者策略 |
+| metrics.db 过大 | 查询/磁盘压力 | 5m 聚合、1h/1d Rollup、Retention、只保存关键历史指标 |
+| WAL 长时间不 checkpoint | 磁盘增长 | 定时 checkpoint、平台自监控、阈值告警 |
+| 单中心端宕机 | 暂停管理/调度 | DB 业务不依赖中心端；Volume 持久化；容器快速重建 |
+| Server 重启重复执行 | 二次变更 | Durable Task + Lease + Agent Marker + Verify + INTERRUPTED |
+| Agent 变成远程 Shell | 平台失陷扩大影响 | Action 白名单，禁止任意命令/SQL |
+| 工具版本不兼容 | 备份/安装失败 | compatibility matrix + PreCheck |
+| 安装重复执行 | 覆盖已有库 | 幂等键 + DataDir/Port 检查 |
+| 主从初始化误清数据 | 数据损失 | Replica 空库检查 + 高危确认 |
+| pt-archiver 扫描低效 | OLTP 抖动 | dry-run + EXPLAIN + 索引策略 + 限流 |
+| pt-archiver Lag 增大 | 从库延迟 | max-lag + 平台负载保护 |
+| Oracle Resize 缩小 | ORA 错误/风险 | V1 只允许扩大 |
+| 备份“成功但不可恢复” | 灾难时失败 | Checksum + Restore Verification |
+| Secret 泄漏 | 安全事件 | AES-GCM、0600 临时文件、日志脱敏 |
+
+## 38. 后续版本预留
+
+### 38.1 功能演进
+
+V1.1/V2 可增加 MySQL Planned Switchover、MGR/InnoDB Cluster、Oracle 更多容量管理、PG Bloat/Vacuum 建议、Doris 节点扩缩容、审批流、LDAP/OIDC、CMDB/API 集成、自动恢复演练和 AI DBA 辅助诊断。
+
+### 38.2 架构演进阈值
+
+默认不因为“理论上可能变大”提前引入 PostgreSQL/Redis/时序库。出现以下情况之一再评估 Enterprise Profile：
+
+- 平台自身要求双机/多机 HA。
+- 单节点需要管理的实例数量长期超过设计基线，且指标历史查询成为瓶颈。
+- 需要保存大规模 15~30 秒原始指标超过 30 天。
+- Task 调度需要多个 Server 节点并行领取。
+- 审计/任务写入吞吐明显超出 SQLite 能力。
+
+### 38.3 Enterprise Profile
+
+```text
+Load Balancer
+  -> DBOps Server x N
+  -> PostgreSQL HA        # MetadataRepository
+  -> Redis                # Queue/Lock/Event
+  -> VictoriaMetrics      # MetricsStore
+```
+
+这一升级只替换基础设施实现，不改变 Agent Action、数据库 Adapter、任务业务模型和前端主要 API。
+
+## 附录 A：推荐错误码
+
+```text
+AGENT_OFFLINE
+AGENT_PROTOCOL_MISMATCH
+INVALID_PARAMETER
+PERMISSION_DENIED
+RESOURCE_LOCKED
+PORT_IN_USE
+DISK_NOT_ENOUGH
+DIRECTORY_NOT_EMPTY
+FILE_NOT_FOUND
+CHECKSUM_FAILED
+SOFTWARE_INCOMPATIBLE
+DATABASE_UNREACHABLE
+DATABASE_AUTH_FAILED
+MYSQL_ALREADY_EXISTS
+MYSQL_CONFIG_INVALID
+MYSQL_INITIALIZE_FAILED
+REPLICATION_PRECHECK_FAILED
+REPLICATION_FAILED
+BACKUP_PRECHECK_FAILED
+BACKUP_FAILED
+RESTORE_FAILED
+ARCHIVE_PRECHECK_FAILED
+ARCHIVE_PAUSED_BY_LOAD
+ARCHIVE_VERIFY_FAILED
+ORACLE_TABLESPACE_NOT_FOUND
+ORACLE_DATAFILE_EXISTS
+TASK_TIMEOUT
+TASK_CANCELLED
+```
+
+## 附录 B：推荐权限代码
+
+```text
+host.view
+host.manage
+agent.view
+agent.manage
+database.view
+mysql.install
+mysql.service.start
+mysql.service.stop
+mysql.service.restart
+mysql.replication.create
+mysql.replication.view
+mysql.backup.execute
+mysql.restore.execute
+mysql.archive.manage
+mysql.archive.execute
+oracle.tablespace.view
+oracle.datafile.add
+oracle.datafile.resize
+oracle.backup.execute
+postgres.backup.execute
+doris.backup.execute
+alert.view
+alert.manage
+audit.view
+system.software.manage
+system.credentials.manage
+```
+
+## 附录 C：上线前最低检查清单
+
+- Server/Agent TLS 已启用。
+- Master Key 与数据库分离。
+- 默认管理员密码已替换。
+- Agent 不能执行任意 shell/sql。
+- 数据库账号最小权限验证完成。
+- MySQL/XtraBackup/Toolkit 目标版本兼容性测试完成。
+- pt-archiver 至少在目标量级测试表上压测。
+- Oracle Add/Resize 在同版本测试环境验证。
+- PostgreSQL/Doris 备份恢复至少完成一次恢复验证。
+- 平台元数据库有独立备份。
+- 告警通知链路测试通过。
+- 审计日志中无 Secret。
+
+
+### C.4 单容器部署检查
+
+- `/data/dbops` 已挂载到持久磁盘。
+- `DBOPS_MASTER_KEY` 已设置且已离线备份。
+- `dbops.db`、`metrics.db` WAL 模式正常。
+- 平台自身 Backup Job 已配置。
+- 日志轮转和 metrics retention 已启用。
+- 容器被删除并重新创建后恢复测试通过。
+
+
+## 附录 D：配套文件
+
+- `sql/schema.sqlite.sql`
+- `api/openapi.yaml`
+- `agent/agent-actions.yaml`
+- `config/server.example.yaml`
+- `config/agent.example.yaml`
+- `config/default-alert-rules.yaml`
+- `config/mysql-production.cnf.tmpl`
+- `config/docker-compose.example.yml`
+- `reference/REFERENCES.md`
+
+---
+
+**文档结论：** V1.0 的正确开发顺序不是同时开发四类数据库，而是先完成“Host + Agent + Task + Credential + Audit”的平台骨架，再用 MySQL 安装作为第一条完整业务链路，随后主从、监控、备份、pt-archiver；Oracle 表空间运维接入同一任务框架，最后补齐 PostgreSQL 与 Doris 的监控和备份。这样每个新增能力都复用同一 Task + Action + Adapter 架构，不需要重新发明执行链路。
