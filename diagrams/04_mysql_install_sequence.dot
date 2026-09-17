@@ -1,0 +1,12 @@
+digraph G {
+ graph [bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.48, splines=ortho];
+ node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#3763A3", fontname="DejaVu Sans", fontsize=9, width=1.7, height=0.55];
+ edge [color="#5F6F82", arrowsize=0.65];
+ a[label="1. Web 创建安装任务"]; b[label="2. Server 参数校验\n分配 server_id"]; c[label="3. Agent PreCheck\nOS/CPU/内存/磁盘/端口"]; d[label="4. 下载软件包\nSHA256 校验"]; e[label="5. 创建用户/目录\n渲染 my.cnf"];
+ f[label="6. mysqld --initialize"]; g[label="7. systemd 安装\n启动 MySQL"]; h[label="8. 初始化管理/监控\n备份账号"]; i[label="9. 注册实例\n开启监控"]; j[label="10. Final Verify\nSUCCESS", fillcolor="#EAF9F1"];
+ {rank=same; a;b;c;d;e}
+ {rank=same; j;i;h;g;f}
+ a->b->c->d->e;
+ e->f;
+ f->g->h->i->j;
+}
