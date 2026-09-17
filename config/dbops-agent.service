@@ -1,0 +1,17 @@
+[Unit]
+Description=DBOps Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dbops-agent
+Group=dbops-agent
+ExecStart=/usr/local/bin/dbops-agent --config /etc/dbops-agent/agent.yaml
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
