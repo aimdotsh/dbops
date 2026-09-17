@@ -1,0 +1,10 @@
+digraph G {
+ graph [bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.5, splines=ortho];
+ node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#3763A3", fontname="DejaVu Sans", fontsize=9, width=1.85, height=0.6];
+ edge [color="#5F6F82", arrowsize=0.65];
+ a[label="1. 归档策略\n表/条件/目标/批次"]; b[label="2. PreCheck\n主键/索引/结构/复制/负载"]; c[label="3. Dry-run + EXPLAIN\n风险检查"]; d[label="4. pt-archiver\n小批次 Copy/Delete/Commit"];
+ e[label="5. 负载保护\nLag/Threads/CPU/IO"]; p[label="暂停/安全退出\n阈值恢复后再启动", fillcolor="#FFF6DA"]; f[label="6. 完成校验\n归档/删除/目标行数"]; g[label="7. 审计与结果记录", fillcolor="#EAF9F1"];
+ {rank=same; a;b;c;d}
+ {rank=same; g;f;e;p}
+ a->b->c->d->e; e->f->g; e->p [label="超过阈值"]; p->d [label="恢复", constraint=false];
+}
