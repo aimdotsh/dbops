@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .import/docx.* | base64 -d > /tmp/docx_delta.zip
+          cat .import/docx2.* | base64 -d > /tmp/docx_delta.zip
           printf '%s  %s\n'             'cac2c389f2a25ebb55db4b1266033019c504e4fe7ef1fcf5ecc78ddc47096aae'             '/tmp/docx_delta.zip' | sha256sum -c -
 
       - name: Render exact PNG diagrams
