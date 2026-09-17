@@ -1,0 +1,10 @@
+digraph G {
+ graph [bgcolor="white", pad=0.2, nodesep=0.35, ranksep=0.48, splines=ortho];
+ node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#3763A3", fontname="DejaVu Sans", fontsize=9, width=1.75, height=0.55];
+ edge [color="#5F6F82", arrowsize=0.65];
+ a[label="1. 选择 Primary / Replica"]; b[label="2. 兼容性 PreCheck\n版本/GTID/binlog/server_id"]; c[label="3. 创建复制账号"]; d[label="4. XtraBackup/克隆\n初始化 Replica"]; e[label="5. Prepare + Restore\n权限修复"];
+ f[label="6. 配置 Source\nGTID 自动定位"]; g[label="7. START REPLICA"]; h[label="8. 验证 IO/SQL\nGTID + Lag"]; i[label="9. 登记 Topology\n启用告警", fillcolor="#EAF9F1"];
+ {rank=same; a;b;c;d;e}
+ {rank=same; i;h;g;f}
+ a->b->c->d->e; e->f; f->g->h->i;
+}
