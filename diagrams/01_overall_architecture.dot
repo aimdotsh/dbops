@@ -1,0 +1,30 @@
+digraph G {
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.38, ranksep=0.55, fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#5B6B7A", fontname="DejaVu Sans", fontsize=11, margin="0.16,0.10"];
+  edge [color="#637083", arrowsize=0.7];
+  browser [label="Browser"];
+  server [label="dbops-server (ONE Docker)\nGo API + Embedded Vue\nRBAC + Task + Scheduler + Alert + Agent Gateway", fillcolor="#EAF2FF", color="#2878D0"];
+  metadata [label="dbops.db\nSQLite Metadata + WAL"];
+  metrics [label="metrics.db\nSQLite Rollups + Retention"];
+  files [label="/data/dbops\nLogs / Software / Work / Platform Backup"];
+  a1 [label="DBOps Agent\nHost A"];
+  a2 [label="DBOps Agent\nHost B"];
+  a3 [label="DBOps Agent\nHost N"];
+  db1 [label="MySQL / Oracle"];
+  db2 [label="PostgreSQL"];
+  db3 [label="Doris / MySQL"];
+  storage [label="External Backup Storage\nLocal / NFS / SFTP / MinIO / S3"];
+  browser -> server [label=" HTTPS"];
+  server -> metadata;
+  server -> metrics;
+  server -> files;
+  server -> a1 [dir=both, label=" HTTPS/WS"];
+  server -> a2 [dir=both];
+  server -> a3 [dir=both];
+  a1 -> db1;
+  a2 -> db2;
+  a3 -> db3;
+  a1 -> storage [style=dashed];
+  a2 -> storage [style=dashed];
+  a3 -> storage [style=dashed];
+}
