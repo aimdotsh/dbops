@@ -1,0 +1,106 @@
+version: 1
+transport:
+  protocol: HTTPS_WebSocket
+  agent_initiated_connection: true
+  heartbeat_seconds: 30
+  task_event_push_seconds: 5
+security:
+  arbitrary_shell: forbidden
+  arbitrary_sql: forbidden
+  secret_in_logs: forbidden
+  action_allowlist: required
+common_request:
+  fields: [request_id, task_id, action, protocol_version, timeout_seconds, params]
+common_response:
+  fields: [request_id, task_id, status, progress, step, message, result, error]
+actions:
+  - name: host.info
+    timeout: 30
+    risk: read_only
+  - name: host.disk.list
+    timeout: 30
+    risk: read_only
+  - name: host.port.check
+    timeout: 10
+    risk: read_only
+    params: [port]
+  - name: host.directory.check
+    timeout: 15
+    risk: read_only
+    params: [path, require_empty, min_free_bytes]
+  - name: mysql.precheck
+    timeout: 120
+    risk: read_only
+  - name: mysql.install
+    timeout: 3600
+    risk: change
+    idempotency_key: host_id+port
+  - name: mysql.start
+    timeout: 120
+    risk: change
+  - name: mysql.stop
+    timeout: 120
+    risk: high
+  - name: mysql.restart
+    timeout: 300
+    risk: high
+  - name: mysql.replication.precheck
+    timeout: 300
+    risk: read_only
+  - name: mysql.replication.create
+    timeout: 43200
+    risk: high
+  - name: mysql.replication.status
+    timeout: 60
+    risk: read_only
+  - name: mysql.backup
+    timeout: 86400
+    risk: change
+  - name: mysql.restore
+    timeout: 86400
+    risk: critical
+  - name: mysql.archive.precheck
+    timeout: 600
+    risk: read_only
+  - name: mysql.archive.start
+    timeout: 86400
+    risk: high
+  - name: mysql.archive.pause
+    timeout: 60
+    risk: change
+  - name: mysql.archive.resume
+    timeout: 60
+    risk: change
+  - name: mysql.archive.stop
+    timeout: 60
+    risk: high
+  - name: oracle.status
+    timeout: 60
+    risk: read_only
+  - name: oracle.tablespace.list
+    timeout: 60
+    risk: read_only
+  - name: oracle.datafile.list
+    timeout: 60
+    risk: read_only
+  - name: oracle.datafile.add
+    timeout: 600
+    risk: high
+  - name: oracle.datafile.resize
+    timeout: 600
+    risk: high
+  - name: oracle.rman.backup
+    timeout: 86400
+    risk: change
+  - name: postgres.status
+    timeout: 60
+    risk: read_only
+  - name: postgres.backup
+    timeout: 86400
+    risk: change
+  - name: doris.cluster.status
+    timeout: 60
+    risk: read_only
+  - name: doris.backup
+    timeout: 86400
+    risk: change
