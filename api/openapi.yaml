@@ -1,0 +1,125 @@
+openapi: 3.1.0
+info:
+  title: DBOps API
+  version: 1.0.0
+  description: DBOps V1.0 single-container REST API skeleton. Long-running operations return task_id; infrastructure is hidden behind stable APIs.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Login
+      responses: {'200': {description: OK}}
+  /hosts:
+    get: {summary: List hosts, responses: {'200': {description: OK}}}
+    post: {summary: Create/import host, responses: {'201': {description: Created}}}
+  /hosts/{id}:
+    get:
+      summary: Host detail
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+  /agents:
+    get: {summary: List agents, responses: {'200': {description: OK}}}
+  /databases:
+    get: {summary: List database instances, responses: {'200': {description: OK}}}
+    post: {summary: Import database instance, responses: {'201': {description: Created}}}
+  /mysql/install/precheck:
+    post:
+      summary: Precheck MySQL installation
+      responses: {'200': {description: Precheck report}}
+  /mysql/install:
+    post:
+      summary: Install MySQL and register instance
+      responses: {'202': {description: Task created}}
+  /mysql/replications/precheck:
+    post: {summary: Replication precheck, responses: {'200': {description: Precheck report}}}
+  /mysql/replications:
+    get: {summary: List MySQL replication relations, responses: {'200': {description: OK}}}
+    post: {summary: Create GTID replication, responses: {'202': {description: Task created}}}
+  /mysql/replications/{id}:
+    get:
+      summary: Replication detail
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+  /oracle/{id}/tablespaces:
+    get:
+      summary: List Oracle tablespaces
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+  /oracle/{id}/datafiles:
+    get:
+      summary: List Oracle datafiles
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+    post:
+      summary: Add Oracle datafile
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'202': {description: Task created}}
+  /oracle/{id}/datafiles/{fileId}/resize:
+    post:
+      summary: Enlarge Oracle datafile (V1 only supports expansion)
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+        - {name: fileId, in: path, required: true, schema: {type: string}}
+      responses: {'202': {description: Task created}}
+  /backup-policies:
+    get: {summary: List backup policies, responses: {'200': {description: OK}}}
+    post: {summary: Create backup policy, responses: {'201': {description: Created}}}
+  /backups:
+    get: {summary: List backup jobs, responses: {'200': {description: OK}}}
+    post: {summary: Run backup, responses: {'202': {description: Task created}}}
+  /restores:
+    post: {summary: Run restore, responses: {'202': {description: Task created}}}
+  /archive-policies:
+    get: {summary: List MySQL archive policies, responses: {'200': {description: OK}}}
+    post: {summary: Create archive policy, responses: {'201': {description: Created}}}
+  /archive-policies/{id}/precheck:
+    post:
+      summary: Validate pt-archiver policy
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: Precheck report}}
+  /archive-policies/{id}/execute:
+    post:
+      summary: Execute archive policy
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'202': {description: Task created}}
+  /archive-jobs/{id}/pause:
+    post:
+      summary: Safely pause archive job
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'202': {description: Accepted}}
+  /archive-jobs/{id}/resume:
+    post:
+      summary: Resume archive job
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'202': {description: Accepted}}
+  /tasks:
+    get: {summary: List tasks, responses: {'200': {description: OK}}}
+  /tasks/{id}:
+    get:
+      summary: Task detail
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+  /tasks/{id}/logs:
+    get:
+      summary: Task logs
+      parameters: [{name: id, in: path, required: true, schema: {type: integer}}]
+      responses: {'200': {description: OK}}
+  /alerts:
+    get: {summary: List alert events, responses: {'200': {description: OK}}}
+  /audit-logs:
+    get: {summary: List audit logs, responses: {'200': {description: OK}}}
+
+  /platform/status:
+    get: {summary: Platform health including SQLite/WAL/task/scheduler state, responses: {'200': {description: OK}}}
+  /platform/backups:
+    get: {summary: List DBOps platform self-backups, responses: {'200': {description: OK}}}
+    post: {summary: Create consistent SQLite platform backup, responses: {'202': {description: Task created}}}
+  /metrics/range:
+    get: {summary: Query downsampled historical metrics, responses: {'200': {description: OK}}}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
