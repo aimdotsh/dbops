@@ -1,0 +1,13 @@
+server:
+  url: https://dbops.example.com
+agent:
+  id: auto
+  heartbeat_seconds: 30
+  work_dir: /var/lib/dbops-agent
+  log_dir: /var/log/dbops-agent
+security:
+  bootstrap_token_file: /etc/dbops-agent/bootstrap.token
+  verify_server_tls: true
+executor:
+  max_concurrent_tasks: 2
+  allowed_actions_file: /etc/dbops-agent/actions.yaml
