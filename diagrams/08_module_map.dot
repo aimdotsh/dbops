@@ -1,0 +1,8 @@
+
+digraph G {
+ graph [rankdir=TB, bgcolor="white", pad=0.2];
+ node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#3763A3", fontname="Noto Sans CJK SC", fontsize=10];
+ root[label="DBOps V1.0", fillcolor="#EAF2FF"];
+ asset[label="资产与Agent"]; monitor[label="监控告警"]; mysql[label="MySQL 生命周期"]; oracle[label="Oracle 基础运维"]; pg[label="PostgreSQL"]; doris[label="Doris"]; protect[label="备份恢复"]; archive[label="MySQL归档"]; task[label="任务/审计/RBAC"];
+ root->{asset monitor mysql oracle pg doris protect archive task};
+}
