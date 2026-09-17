@@ -1,0 +1,21 @@
+digraph G {
+  graph [rankdir=LR, bgcolor="white", pad=0.25, nodesep=0.42, ranksep=0.65, fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fillcolor="#F7F9FC", color="#5B6B7A", fontname="DejaVu Sans", fontsize=10];
+  edge [color="#637083", arrowsize=0.7];
+  client [label="DBA Browser"];
+  proxy [label="Optional Enterprise\nReverse Proxy / TLS", style="rounded,dashed"];
+  server [label="Management Host\nONE dbops-server Docker\n:8080\n/data/dbops Volume", fillcolor="#EAF2FF", color="#2878D0"];
+  subgraph cluster_dbzone {
+    label="Database Zone"; color="#D3DCE6";
+    h1 [label="Host 1\ndbops-agent (systemd)\nMySQL"];
+    h2 [label="Host 2\ndbops-agent (systemd)\nOracle"];
+    h3 [label="Host 3\ndbops-agent (systemd)\nPG / Doris"];
+  }
+  backup [label="Existing Backup Storage\nNFS / S3 / MinIO"];
+  client -> proxy [style=dashed]; proxy -> server [style=dashed];
+  client -> server [label="direct optional"];
+  h1 -> server [label="Agent outbound HTTPS/WS"];
+  h2 -> server;
+  h3 -> server;
+  h1 -> backup [style=dashed]; h2 -> backup [style=dashed]; h3 -> backup [style=dashed];
+}
