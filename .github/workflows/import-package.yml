@@ -46,6 +46,7 @@ jobs:
                 dot -Gdpi=160 -Tpng "$f" -o "${f%.dot}.png"
               done
             '
+          rm -f diagrams/04_mysql_install_sequence.png diagrams/05_mysql_replication_sequence.png diagrams/06_archive_flow.png
           cat .import/png04.* | base64 -d > diagrams/04_mysql_install_sequence.png
           cat .import/png05.* | base64 -d > diagrams/05_mysql_replication_sequence.png
           cat .import/png06.* | base64 -d > diagrams/06_archive_flow.png
