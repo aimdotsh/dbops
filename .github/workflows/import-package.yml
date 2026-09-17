@@ -46,6 +46,9 @@ jobs:
                 dot -Gdpi=160 -Tpng "$f" -o "${f%.dot}.png"
               done
             '
+          cat .import/png04.* | base64 -d > diagrams/04_mysql_install_sequence.png
+          cat .import/png05.* | base64 -d > diagrams/05_mysql_replication_sequence.png
+          cat .import/png06.* | base64 -d > diagrams/06_archive_flow.png
           cat > /tmp/png.sha256 <<'EOF'
           98d102d33935c042eec1e18ec8619b5299a72aef7d45a4f0ea47d40392316f36  diagrams/01_overall_architecture.png
           d5aa9f3be007ef6b28006901ee47a23e711c48a4e28f48e638d1b50faaaf1b7a  diagrams/02_deployment_topology.png
