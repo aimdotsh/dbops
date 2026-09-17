@@ -1,0 +1,19 @@
+version: 1
+rules:
+  - {name: HostDisk85, resource: host_filesystem, metric: disk_used_pct, op: ">=", threshold: 85, duration: 300, severity: P2}
+  - {name: HostDisk95, resource: host_filesystem, metric: disk_used_pct, op: ">=", threshold: 95, duration: 60, severity: P1}
+  - {name: AgentOffline, resource: agent, metric: heartbeat_age_seconds, op: ">", threshold: 90, duration: 0, severity: P1}
+  - {name: MySQLDown, db_type: mysql, resource: database, metric: up, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: MySQLConnectionsHigh, db_type: mysql, resource: database, metric: connection_usage_pct, op: ">=", threshold: 85, duration: 300, severity: P2}
+  - {name: MySQLReplicaIOStopped, db_type: mysql, resource: replication, metric: replica_io_running, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: MySQLReplicaSQLStopped, db_type: mysql, resource: replication, metric: replica_sql_running, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: MySQLReplicaLag, db_type: mysql, resource: replication, metric: replication_lag_seconds, op: ">", threshold: 30, duration: 300, severity: P2}
+  - {name: OracleDown, db_type: oracle, resource: database, metric: up, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: OracleTablespace85, db_type: oracle, resource: tablespace, metric: used_pct, op: ">=", threshold: 85, duration: 300, severity: P2}
+  - {name: OracleTablespace95, db_type: oracle, resource: tablespace, metric: used_pct, op: ">=", threshold: 95, duration: 60, severity: P1}
+  - {name: OracleADGLag, db_type: oracle, resource: replication, metric: apply_lag_seconds, op: ">", threshold: 300, duration: 300, severity: P2}
+  - {name: PostgreSQLDown, db_type: postgresql, resource: database, metric: up, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: PostgreSQLLongTxn, db_type: postgresql, resource: database, metric: longest_txn_seconds, op: ">", threshold: 1800, duration: 60, severity: P2}
+  - {name: DorisFEDown, db_type: doris, resource: doris_fe, metric: up, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: DorisBEDown, db_type: doris, resource: doris_be, metric: up, op: "==", threshold: 0, duration: 60, severity: P1}
+  - {name: BackupFailed, resource: backup_job, metric: job_failed, op: "==", threshold: 1, duration: 0, severity: P1}
