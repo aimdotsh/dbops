@@ -1,0 +1,13 @@
+services:
+  dbops:
+    image: dbops/dbops-server:1.0.0
+    container_name: dbops
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DBOPS_MASTER_KEY: ${DBOPS_MASTER_KEY}
+    volumes:
+      - /data/dbops:/data/dbops
+    # 可选：覆盖镜像内默认配置
+    # command: ["--config", "/data/dbops/config/server.yaml"]
