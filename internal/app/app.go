@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/aimdotsh/dbops/internal/agentgateway"
 	"github.com/aimdotsh/dbops/internal/alert"
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
@@ -21,6 +22,7 @@ type App struct {
 	stores    *storage.Stores
 	http      *httpapi.Server
 	tasks     *task.Engine
+	gateway   *agentgateway.Gateway
 	scheduler *scheduler.Scheduler
 	alert     *alert.Engine
 	cancel    context.CancelFunc
@@ -57,8 +59,16 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	hostRepo := reposqlite.HostRepo{DB: stores.Metadata}
+	agentRepo := reposqlite.AgentRepo{DB: stores.Metadata}
 	dbRepo := reposqlite.DatabaseRepo{DB: stores.Metadata}
 	taskRepo := reposqlite.TaskRepo{DB: stores.Metadata}
+
+	gateway := agentgateway.New(
+		agentRepo,
+		taskRepo,
+		logger,
+		cfg.AgentGateway.HeartbeatTimeoutSeconds,
+	)
 
 	taskEngine := task.New(
 		taskRepo,
@@ -70,13 +80,23 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("system.echo", func(ctx context.Context, t domain.Task) (any, error) {
 		return map[string]any{"echo": t.ParametersJSON}, nil
 	})
+	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 
 	return &App{
-		cfg:       cfg,
-		logger:    logger,
-		stores:    stores,
-		http:      httpapi.New(cfg.Server.Listen, hostRepo, dbRepo, taskRepo),
+		cfg:    cfg,
+		logger: logger,
+		stores: stores,
+		http: httpapi.New(
+			cfg.Server.Listen,
+			hostRepo,
+			agentRepo,
+			dbRepo,
+			taskRepo,
+			gateway,
+			cfg.AgentGateway.WebsocketPath,
+		),
 		tasks:     taskEngine,
+		gateway:   gateway,
 		scheduler: scheduler.New(logger, cfg.Scheduler.Enabled, cfg.Scheduler.ScanIntervalSeconds),
 		alert:     alert.New(logger, cfg.Alert.Enabled, cfg.Alert.EvaluateSeconds),
 	}, nil
@@ -86,6 +106,7 @@ func (a *App) Start(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	a.cancel = cancel
 
+	a.gateway.Start(ctx)
 	if err := a.tasks.Start(ctx); err != nil {
 		return err
 	}
