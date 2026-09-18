@@ -27,11 +27,11 @@ func TestExecutorAllowlist(t *testing.T) {
 		t.Fatal("expected non-allowlisted action to fail")
 	}
 
-	result, err := executor.Execute(context.Background(), agentproto.ActionRequest{
+	_, err = executor.Execute(context.Background(), agentproto.ActionRequest{
 		Action: "host.port.check",
 		Params: map[string]any{"port": float64(0)},
 	})
-	if err == nil || result != nil {
+	if err == nil {
 		t.Fatal("expected invalid port to fail")
 	}
 }
