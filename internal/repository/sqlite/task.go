@@ -96,6 +96,17 @@ func (r TaskRepo) UpdateStatus(ctx context.Context, id int64, status string, pro
 	return err
 }
 
+func (r TaskRepo) UpdateProgress(ctx context.Context, id int64, progress int) error {
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	_, err := r.DB.ExecContext(ctx, "UPDATE tasks SET progress=? WHERE id=?", progress, id)
+	return err
+}
+
 func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
 	res, err := r.DB.ExecContext(ctx, "UPDATE tasks SET status='interrupted', lease_owner=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
 		time.Now().UTC().Format(time.RFC3339))
