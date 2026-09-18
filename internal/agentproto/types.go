@@ -5,7 +5,7 @@ import "encoding/json"
 const ProtocolVersion = "1.0"
 
 type Envelope struct {
-	Type string `json:"type"`
+	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
 }
 

@@ -193,14 +193,14 @@ func directoryCheck(ctx context.Context, params map[string]any) (map[string]any,
 	free := uint64(st.Bavail) * uint64(st.Bsize)
 	empty := len(entries) == 0
 	return map[string]any{
-		"path":               path,
-		"exists":             true,
-		"empty":              empty,
-		"require_empty":      requireEmpty,
-		"empty_requirement":  !requireEmpty || empty,
-		"free_bytes":         free,
-		"min_free_bytes":     minFree,
-		"space_requirement":  free >= minFree,
+		"path":              path,
+		"exists":            true,
+		"empty":             empty,
+		"require_empty":     requireEmpty,
+		"empty_requirement": !requireEmpty || empty,
+		"free_bytes":        free,
+		"min_free_bytes":    minFree,
+		"space_requirement": free >= minFree,
 	}, nil
 }
 
