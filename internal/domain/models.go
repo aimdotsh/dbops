@@ -12,6 +12,17 @@ type Host struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type Agent struct {
+	ID              int64      `json:"id"`
+	AgentUUID       string     `json:"agent_uuid"`
+	HostID          *int64     `json:"host_id,omitempty"`
+	Version         string     `json:"version,omitempty"`
+	Architecture    string     `json:"architecture,omitempty"`
+	Status          string     `json:"status"`
+	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
+	Capabilities    []string   `json:"capabilities,omitempty"`
+}
+
 type DatabaseInstance struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
@@ -43,4 +54,30 @@ type Task struct {
 	LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`
 	ErrorCode      *string    `json:"error_code,omitempty"`
 	ErrorMessage   *string    `json:"error_message,omitempty"`
+}
+
+type TaskStep struct {
+	ID             int64      `json:"id"`
+	TaskID         int64      `json:"task_id"`
+	StepNo         int        `json:"step_no"`
+	StepCode       string     `json:"step_code"`
+	StepName       string     `json:"step_name,omitempty"`
+	Status         string     `json:"status"`
+	Progress       int        `json:"progress"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	OutputJSON     string     `json:"output_json,omitempty"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	RecoveryPolicy string     `json:"recovery_policy,omitempty"`
+}
+
+type TaskEvent struct {
+	ID          int64     `json:"id"`
+	TaskID      int64     `json:"task_id"`
+	EventTime   time.Time `json:"event_time"`
+	EventType   string    `json:"event_type"`
+	StepCode    string    `json:"step_code,omitempty"`
+	Level       string    `json:"level"`
+	Message     string    `json:"message,omitempty"`
+	PayloadJSON string    `json:"payload_json"`
 }
