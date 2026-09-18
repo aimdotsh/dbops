@@ -47,6 +47,11 @@ type Config struct {
 		Enabled         bool `yaml:"enabled"`
 		EvaluateSeconds int  `yaml:"evaluate_seconds"`
 	} `yaml:"alert"`
+
+	AgentGateway struct {
+		HeartbeatTimeoutSeconds int    `yaml:"heartbeat_timeout_seconds"`
+		WebsocketPath           string `yaml:"websocket_path"`
+	} `yaml:"agent_gateway"`
 }
 
 func Default() Config {
@@ -71,6 +76,8 @@ func Default() Config {
 	c.Scheduler.ScanIntervalSeconds = 10
 	c.Alert.Enabled = true
 	c.Alert.EvaluateSeconds = 15
+	c.AgentGateway.HeartbeatTimeoutSeconds = 90
+	c.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
 	return c
 }
 
@@ -96,6 +103,12 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Storage.MetricsDB == "" {
 		cfg.Storage.MetricsDB = filepath.Join(cfg.Server.DataDir, "metrics.db")
+	}
+	if cfg.AgentGateway.HeartbeatTimeoutSeconds <= 0 {
+		cfg.AgentGateway.HeartbeatTimeoutSeconds = 90
+	}
+	if cfg.AgentGateway.WebsocketPath == "" {
+		cfg.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
 	}
 	return cfg, nil
 }
