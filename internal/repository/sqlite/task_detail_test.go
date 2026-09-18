@@ -8,8 +8,37 @@ import (
 )
 
 func TestTaskStepAndEvent(t *testing.T) {
-	db := testDBWithDetails(t)
+	db := testDB(t)
 	defer db.Close()
+
+	if _, err := db.Exec(`
+CREATE TABLE task_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL,
+  step_no INTEGER NOT NULL,
+  step_code TEXT NOT NULL,
+  step_name TEXT,
+  status TEXT NOT NULL,
+  progress INTEGER NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  output_json TEXT,
+  error_message TEXT,
+  recovery_policy TEXT,
+  UNIQUE(task_id,step_no)
+);
+CREATE TABLE task_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL,
+  event_time TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  step_code TEXT,
+  level TEXT NOT NULL,
+  message TEXT,
+  payload_json TEXT NOT NULL
+);`); err != nil {
+		t.Fatal(err)
+	}
 
 	repo := TaskRepo{DB: db}
 	ctx := context.Background()
