@@ -12,6 +12,16 @@ type HostRepository interface {
 	Get(context.Context, int64) (domain.Host, error)
 }
 
+type AgentRepository interface {
+	Upsert(context.Context, domain.Agent) (domain.Agent, error)
+	Heartbeat(context.Context, string, []string) error
+	MarkOffline(context.Context, string) error
+	Get(context.Context, int64) (domain.Agent, error)
+	GetByUUID(context.Context, string) (domain.Agent, error)
+	List(context.Context) ([]domain.Agent, error)
+	BindHostByIdentity(context.Context, string, string, string) (*int64, error)
+}
+
 type DatabaseRepository interface {
 	List(context.Context) ([]domain.DatabaseInstance, error)
 }
@@ -23,6 +33,10 @@ type TaskRepository interface {
 	ClaimNext(context.Context, string, int) (*domain.Task, error)
 	UpdateStatus(context.Context, int64, string, int, string, string) error
 	RecoverExpired(context.Context) (int64, error)
+	AddEvent(context.Context, domain.TaskEvent) error
+	ListEvents(context.Context, int64) ([]domain.TaskEvent, error)
+	UpsertStep(context.Context, domain.TaskStep) error
+	ListSteps(context.Context, int64) ([]domain.TaskStep, error)
 }
 
 type LockRepository interface {
