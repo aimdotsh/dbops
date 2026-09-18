@@ -32,6 +32,7 @@ type TaskRepository interface {
 	List(context.Context, int) ([]domain.Task, error)
 	ClaimNext(context.Context, string, int) (*domain.Task, error)
 	UpdateStatus(context.Context, int64, string, int, string, string) error
+	UpdateProgress(context.Context, int64, int) error
 	RecoverExpired(context.Context) (int64, error)
 	AddEvent(context.Context, domain.TaskEvent) error
 	ListEvents(context.Context, int64) ([]domain.TaskEvent, error)
