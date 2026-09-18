@@ -25,7 +25,7 @@ type Config struct {
 	} `yaml:"storage"`
 
 	SQLite struct {
-		BusyTimeoutMS       int `yaml:"busy_timeout_ms"`
+		BusyTimeoutMS        int `yaml:"busy_timeout_ms"`
 		MetadataMaxOpenConns int `yaml:"metadata_max_open_conns"`
 		MetricsMaxOpenConns  int `yaml:"metrics_max_open_conns"`
 	} `yaml:"sqlite"`
