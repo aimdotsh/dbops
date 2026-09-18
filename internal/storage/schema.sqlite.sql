@@ -20,9 +20,11 @@ CREATE TABLE IF NOT EXISTS agents (
   status TEXT NOT NULL DEFAULT 'offline',
   registered_at TEXT, last_heartbeat_at TEXT,
   token_hash TEXT,
-  capabilities_json TEXT NOT NULL DEFAULT '{}',
+  capabilities_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_agents_status_heartbeat ON agents(status,last_heartbeat_at);
+
 CREATE TABLE IF NOT EXISTS database_clusters (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL, db_type TEXT NOT NULL, cluster_type TEXT NOT NULL,
@@ -57,6 +59,35 @@ CREATE TABLE IF NOT EXISTS tasks (
   recovery_policy TEXT NOT NULL DEFAULT 'verify_before_retry'
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_status_created ON tasks(status,created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_agent_status ON tasks(agent_id,status);
+
+CREATE TABLE IF NOT EXISTS task_steps (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  step_no INTEGER NOT NULL,
+  step_code TEXT NOT NULL,
+  step_name TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  progress INTEGER NOT NULL DEFAULT 0,
+  started_at TEXT,
+  finished_at TEXT,
+  output_json TEXT,
+  error_message TEXT,
+  recovery_policy TEXT,
+  UNIQUE(task_id,step_no)
+);
+CREATE TABLE IF NOT EXISTS task_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  event_time TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  step_code TEXT,
+  level TEXT NOT NULL DEFAULT 'INFO',
+  message TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_task_events_task_time ON task_events(task_id,event_time);
+
 CREATE TABLE IF NOT EXISTS resource_locks (
   lock_key TEXT PRIMARY KEY,
   owner_task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
