@@ -14,7 +14,136 @@ jobs:
         with:
           go-version: '1.23.x'
           cache: true
-      - run: go mod tidy
-      - run: test -z "$(gofmt -l cmd internal)"
-      - run: go test ./...
-      - run: go build ./cmd/dbops-server
+
+      - name: Tidy modules
+        run: go mod tidy
+
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Build server and agent
+        run: |
+          go build -o /tmp/dbops-server ./cmd/dbops-server
+          go build -o /tmp/dbops-agent ./cmd/dbops-agent
+
+      - name: Agent gateway integration test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/dbops-server.yaml <<'EOF'
+          server:
+            listen: 127.0.0.1:18080
+            public_url: http://127.0.0.1:18080
+            data_dir: /tmp/dbops-ci
+          storage:
+            metadata_db: /tmp/dbops-ci/dbops.db
+            metrics_db: /tmp/dbops-ci/metrics.db
+            software_dir: /tmp/dbops-ci/software
+            task_work_dir: /tmp/dbops-ci/task-work
+            log_dir: /tmp/dbops-ci/logs
+            platform_backup_dir: /tmp/dbops-ci/platform-backup
+          sqlite:
+            metadata_max_open_conns: 4
+            metrics_max_open_conns: 2
+          task:
+            workers: 2
+            scan_interval_seconds: 1
+            lease_seconds: 30
+          scheduler:
+            enabled: false
+          alert:
+            enabled: false
+          agent_gateway:
+            heartbeat_timeout_seconds: 10
+            websocket_path: /api/v1/agent/ws
+          EOF
+
+          cat >/tmp/dbops-agent.yaml <<'EOF'
+          server:
+            url: http://127.0.0.1:18080
+          agent:
+            id: ci-agent
+            heartbeat_seconds: 1
+            work_dir: /tmp/dbops-agent-ci
+            log_dir: /tmp/dbops-agent-ci/logs
+          security:
+            verify_server_tls: true
+          executor:
+            max_concurrent_tasks: 1
+            allowed_actions_file: agent/agent-actions.yaml
+          EOF
+
+          /tmp/dbops-server --config /tmp/dbops-server.yaml >/tmp/dbops-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID $AGENT_PID 2>/dev/null || true; cat /tmp/dbops-server.log; cat /tmp/dbops-agent.log 2>/dev/null || true' EXIT
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null; then break; fi
+            sleep 1
+          done
+
+          /tmp/dbops-agent --config /tmp/dbops-agent.yaml >/tmp/dbops-agent.log 2>&1 &
+          AGENT_PID=$!
+
+          python3 - <<'PY'
+          import json, time, urllib.request
+
+          base = "http://127.0.0.1:18080/api/v1"
+
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=3) as r:
+                  return json.load(r)["data"]
+
+          agent_id = None
+          for _ in range(30):
+              try:
+                  agents = get("/agents")
+                  if agents:
+                      agent_id = agents[0]["id"]
+                      break
+              except Exception:
+                  pass
+              time.sleep(1)
+          if not agent_id:
+              raise SystemExit("agent did not register")
+
+          payload = {
+              "task_type": "agent.action",
+              "agent_id": agent_id,
+              "parameters_json": json.dumps({
+                  "action": "host.info",
+                  "timeout_seconds": 10,
+                  "params": {}
+              })
+          }
+          req = urllib.request.Request(
+              base + "/tasks",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=3) as r:
+              task_id = json.load(r)["data"]["id"]
+
+          task = None
+          for _ in range(30):
+              task = get(f"/tasks/{task_id}")
+              if task["status"] in ("success", "failed", "timeout", "cancelled"):
+                  break
+              time.sleep(1)
+
+          if not task or task["status"] != "success":
+              raise SystemExit(f"task did not succeed: {task}")
+
+          steps = get(f"/tasks/{task_id}/steps")
+          events = get(f"/tasks/{task_id}/events")
+          if not steps or steps[-1]["status"] != "success":
+              raise SystemExit(f"step verification failed: {steps}")
+          if len(events) < 2:
+              raise SystemExit(f"expected task events, got: {events}")
+
+          print("agent gateway integration OK", {"agent_id": agent_id, "task_id": task_id})
+          PY
