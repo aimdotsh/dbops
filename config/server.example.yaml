@@ -2,10 +2,6 @@ server:
   listen: 0.0.0.0:8080
   public_url: http://127.0.0.1:8080
   data_dir: /data/dbops
-  tls:
-    enabled: false
-    cert_file: ""
-    key_file: ""
 
 storage:
   metadata_db: /data/dbops/dbops.db
@@ -16,8 +12,6 @@ storage:
   platform_backup_dir: /data/dbops/platform-backup
 
 sqlite:
-  journal_mode: WAL
-  synchronous: NORMAL
   busy_timeout_ms: 5000
   metadata_max_open_conns: 8
   metrics_max_open_conns: 4
@@ -32,32 +26,13 @@ task:
 scheduler:
   enabled: true
   scan_interval_seconds: 10
-  default_misfire_policy: run_once
-
-metrics:
-  heartbeat_seconds: 30
-  latest_ring_minutes: 60
-  flush_5m: true
-  retention_5m_days: 30
-  retention_1h_days: 180
-  retention_1d_days: 730
 
 alert:
   enabled: true
   evaluate_seconds: 15
 
-security:
-  secret_master_key_env: DBOPS_MASTER_KEY
-  access_token_minutes: 30
-  refresh_token_hours: 24
-
 agent_gateway:
   heartbeat_timeout_seconds: 90
   websocket_path: /api/v1/agent/ws
-
-logging:
-  level: info
-  format: json
-  rotate_days: 30
-  rotate_size_mb: 100
-  redact_keys: [password, secret, token, access_key, private_key]
+  bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+  allow_insecure_registration: false
