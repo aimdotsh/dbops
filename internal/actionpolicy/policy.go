@@ -33,6 +33,7 @@ var policies = map[string]Policy{
 	"mysql.restart":              {Action: "mysql.restart", Risk: R3, ConfirmationRequired: true},
 	"mysql.replication.precheck": {Action: "mysql.replication.precheck", Risk: R0},
 	"mysql.replication.create":   {Action: "mysql.replication.create", Risk: R3, ConfirmationRequired: true},
+	"mysql.replication.status":   {Action: "mysql.replication.status", Risk: R0},
 	"mysql.backup":               {Action: "mysql.backup", Risk: R1},
 	"mysql.restore":              {Action: "mysql.restore", Risk: R4, ConfirmationRequired: true},
 	"mysql.archive.precheck":     {Action: "mysql.archive.precheck", Risk: R0},
