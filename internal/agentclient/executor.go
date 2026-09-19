@@ -17,8 +17,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ProgressReporter func(agentproto.ActionResponse)
+
 type Executor struct {
-	specs map[string]agentproto.ActionSpec
+	specs   map[string]agentproto.ActionSpec
+	workDir string
 }
 
 func LoadExecutor(path string) (*Executor, error) {
@@ -34,7 +37,13 @@ func LoadExecutor(path string) (*Executor, error) {
 	for _, spec := range file.Actions {
 		specs[spec.Name] = spec
 	}
-	return &Executor{specs: specs}, nil
+	return &Executor{specs: specs, workDir: "/var/lib/dbops-agent"}, nil
+}
+
+func (e *Executor) SetWorkDir(path string) {
+	if path != "" {
+		e.workDir = path
+	}
 }
 
 func (e *Executor) Capabilities() []string {
@@ -46,6 +55,10 @@ func (e *Executor) Capabilities() []string {
 }
 
 func (e *Executor) Execute(parent context.Context, req agentproto.ActionRequest) (any, error) {
+	return e.ExecuteWithReporter(parent, req, nil)
+}
+
+func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.ActionRequest, report ProgressReporter) (any, error) {
 	spec, ok := e.specs[req.Action]
 	if !ok {
 		return nil, fmt.Errorf("action %q is not allowed", req.Action)
@@ -80,6 +93,9 @@ func (e *Executor) Execute(parent context.Context, req agentproto.ActionRequest)
 	case "mysql.precheck":
 		return mysqlPrecheck(ctx, req.Params)
 	case "mysql.install":
+		if execute, _ := req.Params["execute"].(bool); execute {
+			return mysqlInstall(ctx, e.workDir, req, report)
+		}
 		return mysqlInstallPlan(req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
