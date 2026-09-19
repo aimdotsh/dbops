@@ -21,14 +21,14 @@ type AgentDispatcher interface {
 }
 
 type Service struct {
-	agents       repository.AgentRepository
-	dbs          repository.DatabaseRepository
-	credentials  repository.CredentialRepository
-	policies     repository.ArchivePolicyRepository
-	jobs         repository.ArchiveJobRepository
-	tasks        repository.TaskRepository
-	cipher       *security.Cipher
-	dispatcher   AgentDispatcher
+	agents      repository.AgentRepository
+	dbs         repository.DatabaseRepository
+	credentials repository.CredentialRepository
+	policies    repository.ArchivePolicyRepository
+	jobs        repository.ArchiveJobRepository
+	tasks       repository.TaskRepository
+	cipher      *security.Cipher
+	dispatcher  AgentDispatcher
 }
 
 type PolicyRequest struct {
@@ -352,7 +352,7 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 3, StepCode: "ARCHIVE_VERIFY", StepName: "Verify archive result",
 			Status: "success", Progress: 100,
-			OutputJSON: fmt.Sprintf("{\"archive_job_id\":%d,\"status\":%q,\"scanned_rows\":%d,\"archived_rows\":%d,\"deleted_rows\":%d}", job.ID, jobState, scanned, archived, deleted),
+			OutputJSON:     fmt.Sprintf("{\"archive_job_id\":%d,\"status\":%q,\"scanned_rows\":%d,\"archived_rows\":%d,\"deleted_rows\":%d}", job.ID, jobState, scanned, archived, deleted),
 			RecoveryPolicy: "verify_before_retry",
 		})
 		return map[string]any{

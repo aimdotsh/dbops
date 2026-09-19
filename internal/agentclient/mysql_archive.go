@@ -165,16 +165,16 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	}
 	scanned, archived, deleted := parseArchiveStats(out.String(), deleteSource)
 	return map[string]any{
-		"status":         state,
-		"scanned_rows":   scanned,
-		"archived_rows":  archived,
-		"deleted_rows":   deleted,
-		"failed_rows":    int64(0),
-		"delete_source":  deleteSource,
-		"statistics":     trimOutput(out.String(), 16384),
-		"verification":   "command_completed",
-		"pause_reason":   pauseReason,
-		"sentinel_path":  sentinel,
+		"status":        state,
+		"scanned_rows":  scanned,
+		"archived_rows": archived,
+		"deleted_rows":  deleted,
+		"failed_rows":   int64(0),
+		"delete_source": deleteSource,
+		"statistics":    trimOutput(out.String(), 16384),
+		"verification":  "command_completed",
+		"pause_reason":  pauseReason,
+		"sentinel_path": sentinel,
 	}, nil
 }
 
