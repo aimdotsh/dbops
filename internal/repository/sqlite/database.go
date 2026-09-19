@@ -73,3 +73,10 @@ func scanDatabase(s databaseScanner) (domain.DatabaseInstance, error) {
 	}
 	return d, err
 }
+
+
+func (r DatabaseRepo) UpdateStatus(ctx context.Context, id int64, status string) error {
+	_, err := r.DB.ExecContext(ctx, "UPDATE database_instances SET status=?,updated_at=? WHERE id=?",
+		status, time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}
