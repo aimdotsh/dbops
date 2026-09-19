@@ -116,7 +116,6 @@ func decodeSnapshot(resourceType string, resourceID int64, ts, raw string) (Snap
 	return Snapshot{ResourceType: resourceType, ResourceID: resourceID, CollectedAt: t, Payload: payload}, nil
 }
 
-
 func (s *Store) ListLatest(ctx context.Context, resourceType string) ([]Snapshot, error) {
 	rows, err := s.DB.QueryContext(ctx,
 		"SELECT resource_id,collected_at,payload_json FROM metric_latest WHERE resource_type=? ORDER BY resource_id",

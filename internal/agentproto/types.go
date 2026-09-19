@@ -31,8 +31,8 @@ type Registration struct {
 }
 
 type Heartbeat struct {
-	AgentUUID    string   `json:"agent_uuid"`
-	RunningTasks int      `json:"running_tasks"`
+	AgentUUID    string         `json:"agent_uuid"`
+	RunningTasks int            `json:"running_tasks"`
 	Capabilities []string       `json:"capabilities,omitempty"`
 	HostMetrics  map[string]any `json:"host_metrics,omitempty"`
 }
