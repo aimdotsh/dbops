@@ -6,6 +6,17 @@ import (
 	"github.com/aimdotsh/dbops/internal/domain"
 )
 
+type AuthRepository interface {
+	CountUsers(context.Context) (int64, error)
+	CreateUser(context.Context, domain.User, string) (domain.User, error)
+	GetUser(context.Context, int64) (domain.User, error)
+	GetUserByUsername(context.Context, string) (domain.User, error)
+	ListUsers(context.Context) ([]domain.User, error)
+	UpdateLastLogin(context.Context, int64) error
+	StoreRefreshToken(context.Context, int64, string, string) error
+	ConsumeRefreshToken(context.Context, string, string) (int64, error)
+}
+
 type HostRepository interface {
 	List(context.Context) ([]domain.Host, error)
 	Create(context.Context, domain.Host) (domain.Host, error)
