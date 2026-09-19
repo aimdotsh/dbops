@@ -1,0 +1,408 @@
+name: MySQL Replication CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'agent/**'
+      - 'config/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/mysql-replication-ci.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'agent/**'
+      - 'config/**'
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  replication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Build binaries
+        run: |
+          go build -o /tmp/dbops-server ./cmd/dbops-server
+          go build -o /tmp/dbops-agent ./cmd/dbops-agent
+
+      - name: Build fake MySQL package
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dbops-repl /tmp/fake-mysql-src
+          mkdir -p /tmp/dbops-repl/agent /tmp/fake-mysql-src/mysql-fake/bin
+          printf '%s\n' 'repl-bootstrap-token' >/tmp/dbops-repl/agent/bootstrap.token
+          chmod 600 /tmp/dbops-repl/agent/bootstrap.token
+
+          cat >/tmp/fake-mysql-src/mysql-fake/bin/mysqld <<'PY'
+          #!/usr/bin/env python3
+          import configparser, json, os, socket, subprocess, sys, time, uuid
+
+          args = sys.argv[1:]
+          cfg_path = next((a.split("=", 1)[1] for a in args if a.startswith("--defaults-file=")), "")
+          if not cfg_path:
+              sys.exit(2)
+          cfg = configparser.ConfigParser()
+          cfg.read(cfg_path)
+          m = cfg["mysqld"]
+          port = int(m["port"])
+          server_id = int(m["server_id"])
+          datadir = m["datadir"]
+          socket_path = m["socket"]
+          run_dir = os.path.dirname(socket_path)
+          pidfile = m["pid-file"]
+          os.makedirs(run_dir, exist_ok=True)
+
+          instance = {
+              "version": "8.0.99",
+              "server_uuid": "00000000-0000-0000-0000-" + str(server_id).zfill(12),
+              "server_id": server_id,
+              "port": port,
+          }
+          with open(os.path.join(run_dir, "fake-instance.json"), "w") as f:
+              json.dump(instance, f)
+
+          if "--validate-config" in args:
+              sys.exit(0)
+
+          if "--initialize-insecure" in args:
+              os.makedirs(datadir, exist_ok=True)
+              with open(os.path.join(datadir, "auto.cnf"), "w") as f:
+                  f.write("[auto]\nserver-uuid=" + instance["server_uuid"] + "\n")
+              sys.exit(0)
+
+          if "--daemonize" in args:
+              code = """
+          import os, socket, sys
+          port = int(sys.argv[1])
+          pidfile = sys.argv[2]
+          os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+          with open(pidfile, "w") as f:
+              f.write(str(os.getpid()))
+          s = socket.socket()
+          s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(("127.0.0.1", port))
+          s.listen(16)
+          while True:
+              c, _ = s.accept()
+              c.close()
+          """
+              subprocess.Popen(
+                  [sys.executable, "-c", code, str(port), pidfile],
+                  stdin=subprocess.DEVNULL,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  start_new_session=True,
+              )
+              for _ in range(30):
+                  if os.path.exists(pidfile):
+                      sys.exit(0)
+                  time.sleep(0.1)
+              sys.exit(3)
+
+          sys.exit(0)
+          PY
+
+          cat >/tmp/fake-mysql-src/mysql-fake/bin/mysql <<'PY'
+          #!/usr/bin/env python3
+          import configparser, json, os, re, sys
+
+          args = sys.argv[1:]
+          cfg_path = next((a.split("=", 1)[1] for a in args if a.startswith("--defaults-extra-file=")), "")
+          cfg = configparser.ConfigParser()
+          cfg.read(cfg_path)
+          socket_path = cfg["client"]["socket"]
+          run_dir = os.path.dirname(socket_path)
+          with open(os.path.join(run_dir, "fake-instance.json")) as f:
+              inst = json.load(f)
+
+          if "-e" in args:
+              q = args[args.index("-e") + 1]
+              if "@@version" in q:
+                  print("\t".join([
+                      inst["version"], inst["server_uuid"], str(inst["server_id"]),
+                      "ON", "1", "ROW", "0", "0"
+                  ]))
+                  sys.exit(0)
+              if "SHOW REPLICA STATUS" in q:
+                  state_path = os.path.join(run_dir, "replica-state.json")
+                  if not os.path.exists(state_path):
+                      sys.exit(0)
+                  state = json.load(open(state_path))
+                  fields = {
+                      "Replica_IO_Running": "Yes",
+                      "Replica_SQL_Running": "Yes",
+                      "Seconds_Behind_Source": "0",
+                      "Source_UUID": state.get("source_uuid", "source-uuid-ci"),
+                      "Source_Host": state["source_host"],
+                      "Last_IO_Error": "",
+                      "Last_SQL_Error": "",
+                      "Retrieved_Gtid_Set": "source:1-10",
+                      "Executed_Gtid_Set": "source:1-10",
+                  }
+                  for k, v in fields.items():
+                      print(f"{k}: {v}")
+                  sys.exit(0)
+
+          sql = sys.stdin.read()
+          if "CHANGE REPLICATION SOURCE TO" in sql:
+              host = re.search(r"SOURCE_HOST='([^']+)'", sql)
+              port = re.search(r"SOURCE_PORT=([0-9]+)", sql)
+              state = {
+                  "source_host": host.group(1) if host else "127.0.0.1",
+                  "source_port": int(port.group(1)) if port else 3306,
+                  "source_uuid": "source-uuid-ci",
+              }
+              with open(os.path.join(run_dir, "replica-state.json"), "w") as f:
+                  json.dump(state, f)
+          sys.exit(0)
+          PY
+
+          cat >/tmp/fake-mysql-src/mysql-fake/bin/mysqladmin <<'PY'
+          #!/usr/bin/env python3
+          import sys
+          sys.exit(0)
+          PY
+
+          chmod +x /tmp/fake-mysql-src/mysql-fake/bin/*
+          tar -C /tmp/fake-mysql-src -czf /tmp/mysql-fake-repl.tar.gz mysql-fake
+
+      - name: Start DBOps Server and Agent
+        run: |
+          cat >/tmp/dbops-repl/server.yaml <<'EOF'
+          server:
+            listen: 127.0.0.1:18081
+            public_url: http://127.0.0.1:18081
+            data_dir: /tmp/dbops-repl/server
+          storage:
+            metadata_db: /tmp/dbops-repl/server/dbops.db
+            metrics_db: /tmp/dbops-repl/server/metrics.db
+            software_dir: /tmp/dbops-repl/server/software
+            task_work_dir: /tmp/dbops-repl/server/task-work
+            log_dir: /tmp/dbops-repl/server/logs
+            platform_backup_dir: /tmp/dbops-repl/server/platform-backup
+          sqlite:
+            metadata_max_open_conns: 4
+            metrics_max_open_conns: 2
+          task:
+            workers: 2
+            scan_interval_seconds: 1
+            lease_seconds: 30
+          scheduler:
+            enabled: false
+          alert:
+            enabled: false
+          security:
+            master_key_env: DBOPS_MASTER_KEY
+            package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          mysql_install:
+            allow_process_mode: true
+          agent_gateway:
+            heartbeat_timeout_seconds: 10
+            websocket_path: /api/v1/agent/ws
+            bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+            allow_insecure_registration: false
+          EOF
+
+          cat >/tmp/dbops-repl/agent.yaml <<'EOF'
+          server:
+            url: http://127.0.0.1:18081
+          agent:
+            id: repl-ci-agent
+            heartbeat_seconds: 1
+            work_dir: /tmp/dbops-repl/agent
+            log_dir: /tmp/dbops-repl/agent/logs
+          security:
+            bootstrap_token_file: /tmp/dbops-repl/agent/bootstrap.token
+            credential_file: /tmp/dbops-repl/agent/agent.credential
+            verify_server_tls: true
+          executor:
+            max_concurrent_tasks: 2
+            allowed_actions_file: agent/agent-actions.yaml
+          EOF
+
+          DBOPS_AGENT_BOOTSTRAP_TOKEN=repl-bootstrap-token           DBOPS_MASTER_KEY=repl-master-key-0123456789abcdef           DBOPS_PACKAGE_SIGNING_KEY=repl-package-key-0123456789abcdef             /tmp/dbops-server --config /tmp/dbops-repl/server.yaml >/tmp/dbops-repl/server.log 2>&1 &
+          echo $! >/tmp/dbops-repl/server.pid
+
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18081/api/v1/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18081/api/v1/health >/dev/null
+
+          /tmp/dbops-agent --config /tmp/dbops-repl/agent.yaml >/tmp/dbops-repl/agent.log 2>&1 &
+          echo $! >/tmp/dbops-repl/agent.pid
+
+      - name: Install two MySQL instances and create GTID replication
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, time, urllib.request
+
+          base = "http://127.0.0.1:18081/api/v1"
+
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=5) as r:
+                  return json.load(r)["data"]
+
+          def post(path, body):
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=5) as r:
+                  return json.load(r)["data"]
+
+          def wait_task(task_id, timeout=90):
+              end = time.time() + timeout
+              last = None
+              while time.time() < end:
+                  last = get(f"/tasks/{task_id}")
+                  if last["status"] in ("success", "failed", "timeout", "cancelled"):
+                      return last
+                  time.sleep(0.5)
+              raise RuntimeError(f"task timeout: {last}")
+
+          agent_id = None
+          for _ in range(30):
+              try:
+                  agents = get("/agents")
+                  if agents and agents[0]["status"] == "online":
+                      agent_id = agents[0]["id"]
+                      break
+              except Exception:
+                  pass
+              time.sleep(1)
+          if not agent_id:
+              raise SystemExit("agent did not register")
+
+          upload = subprocess.check_output([
+              "curl", "-fsS", "-X", "POST", base + "/software/packages",
+              "-F", "software_name=mysql",
+              "-F", "version=8.0.99",
+              "-F", "os_family=linux",
+              "-F", "architecture=amd64",
+              "-F", "package_type=tar.gz",
+              "-F", "file=@/tmp/mysql-fake-repl.tar.gz",
+          ])
+          package_id = json.loads(upload)["data"]["id"]
+
+          def install(port):
+              root = f"/tmp/dbops-repl/mysql-{port}"
+              task = post("/mysql/install", {
+                  "agent_id": agent_id,
+                  "package_id": package_id,
+                  "name": f"mysql-ci-{port}",
+                  "port": port,
+                  "base_dir": root + "/base",
+                  "data_dir": root + "/data",
+                  "log_dir": root + "/log",
+                  "binlog_dir": root + "/binlog",
+                  "run_dir": root + "/run",
+                  "config_path": root + "/etc/my.cnf",
+                  "service_name": f"dbops-mysql-ci-{port}",
+                  "service_mode": "process",
+                  "mysql_user": "dbops-ci-user",
+                  "manage_os_user": False,
+                  "innodb_buffer_pool_bytes": 134217728,
+                  "max_connections": 100,
+                  "min_free_bytes": 1,
+                  "min_memory_bytes": 1,
+                  "min_cpu_cores": 1,
+              })
+              final = wait_task(task["id"])
+              if final["status"] != "success":
+                  raise SystemExit(f"install {port} failed: {final}")
+              dbs = get("/databases")
+              match = [d for d in dbs if d["port"] == port]
+              if len(match) != 1:
+                  raise SystemExit(f"instance {port} not registered: {dbs}")
+              return match[0]
+
+          primary = install(13306)
+          replica = install(13307)
+          if primary["id"] == replica["id"]:
+              raise SystemExit("primary and replica instance IDs collide")
+
+          repl_task = post("/mysql/replications", {
+              "primary_instance_id": primary["id"],
+              "replica_instance_id": replica["id"],
+              "baseline_ready": True,
+              "confirmed": True,
+          })
+          final = wait_task(repl_task["id"])
+          if final["status"] != "success":
+              raise SystemExit(f"replication creation failed: {final}")
+
+          steps = get(f"/tasks/{repl_task['id']}/steps")
+          by_no = {s["step_no"]: s for s in steps}
+          missing = [n for n in range(1, 9) if n not in by_no]
+          bad = [(n, by_no[n]["status"]) for n in by_no if 1 <= n <= 8 and by_no[n]["status"] != "success"]
+          if missing or bad:
+              raise SystemExit(f"replication steps invalid missing={missing} bad={bad} steps={steps}")
+
+          reps = get("/mysql/replications")
+          if len(reps) != 1 or reps[0]["status"] != "healthy":
+              raise SystemExit(f"replication topology not healthy: {reps}")
+
+          refreshed = post(f"/mysql/replications/{reps[0]['id']}/refresh", {})
+          if refreshed["status"] != "healthy":
+              raise SystemExit(f"replication refresh failed: {refreshed}")
+          if refreshed["io_thread_status"] != "Yes" or refreshed["sql_thread_status"] != "Yes":
+              raise SystemExit(f"replication threads not healthy: {refreshed}")
+
+          print("GTID replication end-to-end OK", {
+              "primary": primary["id"],
+              "replica": replica["id"],
+              "replication": refreshed["id"],
+              "lag": refreshed.get("replication_lag_seconds"),
+          })
+          PY
+
+      - name: Verify persisted topology and encrypted replication credential
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          db = sqlite3.connect("/tmp/dbops-repl/server/dbops.db")
+          cur = db.cursor()
+
+          row = cur.execute("""
+              select r.status, r.primary_instance_id, r.replica_instance_id,
+                     c.encrypted_secret, c.credential_type
+              from mysql_replications r
+              join credentials c on c.id = r.replication_credential_id
+          """).fetchone()
+          if not row or row[0] != "healthy" or row[1] == row[2]:
+              raise SystemExit(f"invalid replication row: {row}")
+          if row[4] != "mysql_replication" or len(row[3]) < 40:
+              raise SystemExit("replication credential is missing or not encrypted")
+
+          sids = cur.execute("select server_id from mysql_server_ids order by server_id").fetchall()
+          if len(sids) != 2 or sids[0][0] == sids[1][0]:
+              raise SystemExit(f"server_id uniqueness failed: {sids}")
+
+          print("replication persistence OK", row[:3], sids)
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          for p in /tmp/dbops-repl/mysql-13306/run/mysqld.pid /tmp/dbops-repl/mysql-13307/run/mysqld.pid; do
+            if test -f "$p"; then kill "$(cat "$p")" 2>/dev/null || true; fi
+          done
+          if test -f /tmp/dbops-repl/agent.pid; then kill "$(cat /tmp/dbops-repl/agent.pid)" 2>/dev/null || true; fi
+          if test -f /tmp/dbops-repl/server.pid; then kill "$(cat /tmp/dbops-repl/server.pid)" 2>/dev/null || true; fi
+          echo "--- server log ---"
+          cat /tmp/dbops-repl/server.log 2>/dev/null || true
+          echo "--- agent log ---"
+          cat /tmp/dbops-repl/agent.log 2>/dev/null || true
