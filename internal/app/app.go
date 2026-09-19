@@ -19,6 +19,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	oraclesvc "github.com/aimdotsh/dbops/internal/oracle"
+	pgsvc "github.com/aimdotsh/dbops/internal/postgres"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
 	"github.com/aimdotsh/dbops/internal/security"
@@ -153,6 +154,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	mysqlService := mysqlservice.New(agentRepo, dbRepo, taskRepo, gateway)
 	oracleService := oraclesvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
+	postgresService := pgsvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
 
 	taskEngine := task.New(
 		taskRepo,
@@ -174,6 +176,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("oracle.datafile.add", oracleService.AddHandler())
 	taskEngine.Register("oracle.datafile.resize", oracleService.ResizeHandler())
 	taskEngine.Register("oracle.rman.backup", oracleService.RMANBackupHandler())
+	taskEngine.Register("postgres.backup", postgresService.BackupHandler())
 
 	return &App{
 		cfg:    cfg,
@@ -195,6 +198,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			mysqlReplication,
 			mysqlService,
 			oracleService,
+			postgresService,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
