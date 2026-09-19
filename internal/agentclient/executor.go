@@ -107,6 +107,10 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlServiceAction(ctx, req.Action, req.Params)
 	case "mysql.backup":
 		return mysqlBackup(ctx, e.workDir, req.Params)
+	case "mysql.archive.precheck":
+		return mysqlArchivePrecheck(ctx, e.workDir, req.Params)
+	case "mysql.archive.start":
+		return mysqlArchiveStart(ctx, e.workDir, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
