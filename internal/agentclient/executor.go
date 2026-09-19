@@ -113,6 +113,16 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlArchiveStart(ctx, e.workDir, req.Params)
 	case "mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop":
 		return mysqlArchiveControl(e.workDir, req.Action, req.Params)
+	case "oracle.status":
+		return oracleStatus(ctx, e.workDir, req.Params)
+	case "oracle.tablespace.list":
+		return oracleTablespaceList(ctx, e.workDir, req.Params)
+	case "oracle.datafile.list":
+		return oracleDatafileList(ctx, e.workDir, req.Params)
+	case "oracle.datafile.add":
+		return oracleDatafileAdd(ctx, e.workDir, req.Params)
+	case "oracle.datafile.resize":
+		return oracleDatafileResize(ctx, e.workDir, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
