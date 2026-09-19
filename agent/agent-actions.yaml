@@ -100,6 +100,9 @@ actions:
   - name: postgres.status
     timeout: 60
     risk: R0
+  - name: postgres.replication.status
+    timeout: 60
+    risk: R0
   - name: postgres.backup
     timeout: 86400
     risk: R1
