@@ -10,6 +10,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/httpapi"
+	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
@@ -79,6 +80,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	serverIDRepo := reposqlite.ServerIDRepo{DB: stores.Metadata}
 	replicationRepo := reposqlite.MySQLReplicationRepo{DB: stores.Metadata}
 	backupRepo := reposqlite.BackupJobRepo{DB: stores.Metadata}
+	archiveRepo := reposqlite.ArchiveJobRepo{DB: stores.Metadata}
 
 	gateway := agentgateway.New(
 		agentRepo,
@@ -110,6 +112,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlBackup := mysqlbackup.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
+	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archiveRepo, taskRepo, cipher, gateway)
 
 	mysqlReplication := mysqlreplication.New(
 		hostRepo,
@@ -137,6 +140,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 	taskEngine.Register("mysql.backup", mysqlBackup.Handler())
+	taskEngine.Register("mysql.archive", mysqlArchive.Handler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
 	taskEngine.Register("mysql.service", mysqlService.Handler())
 
@@ -153,6 +157,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			softwareService,
 			mysqlInstaller,
 			mysqlBackup,
+			mysqlArchive,
 			mysqlReplication,
 			mysqlService,
 			gateway,
