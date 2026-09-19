@@ -206,9 +206,3 @@ func nullableInt(v int) any {
 	return v
 }
 
-func boolInt(v bool) int {
-	if v {
-		return 1
-	}
-	return 0
-}
