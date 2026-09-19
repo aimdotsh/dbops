@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/mysqlinstall"
+	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/aimdotsh/dbops/internal/repository"
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +21,8 @@ type Server struct {
 	agents repository.AgentRepository
 	dbs    repository.DatabaseRepository
 	tasks  repository.TaskRepository
+	software *software.Service
+	mysqlInstaller *mysqlinstall.Service
 }
 
 func New(
@@ -27,6 +31,8 @@ func New(
 	agents repository.AgentRepository,
 	dbs repository.DatabaseRepository,
 	tasks repository.TaskRepository,
+	softwareService *software.Service,
+	mysqlInstaller *mysqlinstall.Service,
 	agentWS http.Handler,
 	websocketPath string,
 ) *Server {
@@ -34,7 +40,7 @@ func New(
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks}
+	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, software: softwareService, mysqlInstaller: mysqlInstaller}
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/health", s.health)
@@ -44,6 +50,10 @@ func New(
 	v1.GET("/agents", s.listAgents)
 	v1.GET("/agents/:id", s.getAgent)
 	v1.GET("/databases", s.listDatabases)
+	v1.GET("/software/packages", s.listSoftwarePackages)
+	v1.POST("/software/packages", s.uploadSoftwarePackage)
+	v1.GET("/software/packages/:id/download", s.downloadSoftwarePackage)
+	v1.POST("/mysql/install", s.createMySQLInstall)
 	v1.GET("/tasks", s.listTasks)
 	v1.POST("/tasks", s.createTask)
 	v1.GET("/tasks/:id", s.getTask)
