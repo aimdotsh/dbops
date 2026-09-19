@@ -1,0 +1,39 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #172033;
+  background: #f4f7fb;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 1100px; background: #f4f7fb; }
+.shell { min-height: 100vh; }
+.sidebar { background: #101828; color: white; display: flex; flex-direction: column; }
+.brand { height: 72px; display: flex; gap: 12px; align-items: center; padding: 0 22px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.brand-mark { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-weight: 800; background: linear-gradient(145deg,#2563eb,#06b6d4); }
+.brand strong,.brand small { display: block; }
+.brand small { color:#98a2b3; margin-top:2px; }
+.nav { border-right:0!important; background: transparent!important; padding-top: 12px; }
+.nav .el-menu-item { color:#d0d5dd; }
+.nav .el-menu-item:hover,.nav .el-menu-item.is-active { color:white; background:#1d2939; }
+.scope-note { margin-top:auto; padding:20px; color:#667085; font-size:12px; }
+.topbar { height:64px; display:flex; align-items:center; justify-content:space-between; background:white; border-bottom:1px solid #e5e7eb; }
+.topbar .muted { margin-left:14px; }
+.user-area { display:flex; gap:10px; align-items:center; }
+.content { padding:24px 28px; }
+.page-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:20px; }
+.page-title h2 { margin:0 0 5px; font-size:24px; }
+.page-title p { margin:0; color:#667085; }
+.metric-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:20px; }
+.metric-card { background:white; border:1px solid #eaecf0; border-radius:12px; padding:18px; min-height:120px; }
+.metric-card span,.metric-card small { display:block; color:#667085; }
+.metric-card strong { display:block; font-size:30px; margin:12px 0 8px; }
+.metric-card.danger strong { color:#d92d20; }
+.two-col { display:grid; grid-template-columns:2fr 1fr; gap:18px; }
+.db-type-list > div { display:flex; justify-content:space-between; padding:13px 2px; border-bottom:1px solid #f0f2f5; text-transform:capitalize; }
+.muted { color:#667085; font-size:13px; }
+.section-gap { margin-top:28px; }
+.full { width:100%; }
+.login-page { min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 25% 25%,#173a78,#0b1220 58%); }
+.login-panel { width:410px; padding:42px; border-radius:18px; background:rgba(255,255,255,.97); box-shadow:0 24px 80px rgba(0,0,0,.25); }
+.login-panel h1 { margin:10px 0 6px; font-size:26px; }
+.login-panel p { margin:0 0 28px; color:#667085; }
+.login-brand { display:inline-block; padding:9px 12px; color:white; background:#155eef; border-radius:9px; font-weight:800; letter-spacing:.5px; }
