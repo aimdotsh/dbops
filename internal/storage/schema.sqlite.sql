@@ -103,6 +103,25 @@ CREATE TABLE IF NOT EXISTS mysql_server_ids (
   UNIQUE(host_id,port)
 );
 
+CREATE TABLE IF NOT EXISTS mysql_replications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  primary_instance_id INTEGER NOT NULL REFERENCES database_instances(id),
+  replica_instance_id INTEGER NOT NULL UNIQUE REFERENCES database_instances(id),
+  replication_credential_id INTEGER REFERENCES credentials(id),
+  gtid_enabled INTEGER NOT NULL DEFAULT 1,
+  io_thread_status TEXT,
+  sql_thread_status TEXT,
+  replication_lag_seconds INTEGER,
+  source_uuid TEXT,
+  last_io_error TEXT,
+  last_sql_error TEXT,
+  last_checked_at TEXT,
+  status TEXT NOT NULL DEFAULT 'unknown',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mysql_replication_primary ON mysql_replications(primary_instance_id);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_no TEXT NOT NULL UNIQUE,
