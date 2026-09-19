@@ -62,11 +62,11 @@ type instanceMetadata struct {
 }
 
 type runtime struct {
-	Instance   domain.DatabaseInstance
-	Agent      domain.Agent
-	Metadata   instanceMetadata
-	Username   string
-	Password   string
+	Instance domain.DatabaseInstance
+	Agent    domain.Agent
+	Metadata instanceMetadata
+	Username string
+	Password string
 }
 
 func New(

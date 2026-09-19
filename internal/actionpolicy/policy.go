@@ -41,7 +41,7 @@ var policies = map[string]Policy{
 	"mysql.archive.pause":        {Action: "mysql.archive.pause", Risk: R1},
 	"mysql.archive.resume":       {Action: "mysql.archive.resume", Risk: R1},
 	"mysql.archive.stop":         {Action: "mysql.archive.stop", Risk: R3, ConfirmationRequired: true},
-	"oracle.dataguard.status":        {Action: "oracle.dataguard.status", Risk: R0},
+	"oracle.dataguard.status":    {Action: "oracle.dataguard.status", Risk: R0},
 	"oracle.status":              {Action: "oracle.status", Risk: R0},
 	"oracle.tablespace.list":     {Action: "oracle.tablespace.list", Risk: R0},
 	"oracle.datafile.list":       {Action: "oracle.datafile.list", Risk: R0},
