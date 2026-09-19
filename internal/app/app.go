@@ -11,6 +11,7 @@ import (
 	authsvc "github.com/aimdotsh/dbops/internal/auth"
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
+	dorissvc "github.com/aimdotsh/dbops/internal/doris"
 	"github.com/aimdotsh/dbops/internal/httpapi"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
@@ -155,6 +156,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	mysqlService := mysqlservice.New(agentRepo, dbRepo, taskRepo, gateway)
 	oracleService := oraclesvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
 	postgresService := pgsvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
+	dorisService := dorissvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
 
 	taskEngine := task.New(
 		taskRepo,
@@ -177,6 +179,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("oracle.datafile.resize", oracleService.ResizeHandler())
 	taskEngine.Register("oracle.rman.backup", oracleService.RMANBackupHandler())
 	taskEngine.Register("postgres.backup", postgresService.BackupHandler())
+	taskEngine.Register("doris.backup", dorisService.BackupHandler())
 
 	return &App{
 		cfg:    cfg,
@@ -199,6 +202,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			mysqlService,
 			oracleService,
 			postgresService,
+			dorisService,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
