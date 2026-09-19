@@ -160,7 +160,15 @@ jobs:
 
           mysql = r'''#!/usr/bin/env python3
           import sys
-          _ = sys.stdin.read()
+          query = ""
+          if "-e" in sys.argv:
+              i = sys.argv.index("-e")
+              if i + 1 < len(sys.argv):
+                  query = sys.argv[i + 1]
+          else:
+              query = sys.stdin.read()
+          if "SHOW INDEX" in query and "PRIMARY" in query:
+              print("t\t0\tPRIMARY\t1\tid\tA\t1\tNone\tNone\t\tBTREE")
           sys.exit(0)
           '''
 
@@ -178,11 +186,22 @@ jobs:
           sys.exit(0)
           '''
 
+          pt_archiver = r'''#!/usr/bin/env python3
+          import sys
+          if "--dry-run" in sys.argv:
+              print("pt-archiver dry-run OK")
+              sys.exit(0)
+          print("DBOPS_ROWS scanned=100 archived=100 deleted=0")
+          print("pt-archiver statistics: 100 rows")
+          sys.exit(0)
+          '''
+
           for name, content in {
               "mysqld": mysqld,
               "mysql": mysql,
               "mysqladmin": mysqladmin,
               "mysqldump": mysqldump,
+              "pt-archiver": pt_archiver,
           }.items():
               path = os.path.join(root, name)
               with open(path, "w") as f:
@@ -387,6 +406,69 @@ jobs:
               "size_bytes": backups[0]["size_bytes"],
               "sha256": backups[0]["checksum"],
           })
+
+          archive_body = {
+              "source_database": "dbops_ci",
+              "source_table": "t",
+              "destination_database": "dbops_ci",
+              "destination_table": "t_archive",
+              "where": "id < 100",
+              "pt_archiver_path": "/tmp/dbops-mysql-ci/base/bin/pt-archiver",
+              "batch_size": 1000,
+              "txn_size": 1000,
+              "sleep_ms": 10,
+              "delete_source": False,
+          }
+          req = urllib.request.Request(
+              base + f"/mysql/instances/{instance_id}/archive/precheck",
+              data=json.dumps(archive_body).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=10) as r:
+              archive_precheck = json.load(r)["data"]
+          if archive_precheck.get("ok") is not True:
+              raise SystemExit(f"archive precheck failed: {archive_precheck}")
+
+          archive_body["confirmed"] = True
+          req = urllib.request.Request(
+              base + f"/mysql/instances/{instance_id}/archive",
+              data=json.dumps(archive_body).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=5) as r:
+              archive_task = json.load(r)["data"]
+          archive_task_id = archive_task["id"]
+
+          archive_final = None
+          for _ in range(120):
+              with urllib.request.urlopen(base + f"/tasks/{archive_task_id}", timeout=5) as r:
+                  archive_final = json.load(r)["data"]
+              if archive_final["status"] in ("success", "failed", "timeout", "cancelled"):
+                  break
+              time.sleep(0.5)
+          if not archive_final or archive_final["status"] != "success":
+              raise SystemExit(f"mysql.archive failed: {archive_final}")
+
+          with urllib.request.urlopen(base + f"/tasks/{archive_task_id}/steps", timeout=5) as r:
+              archive_steps = json.load(r)["data"]
+          if len(archive_steps) != 3 or any(s["status"] != "success" for s in archive_steps):
+              raise SystemExit(f"archive steps invalid: {archive_steps}")
+
+          with urllib.request.urlopen(base + f"/mysql/archive/jobs?instance_id={instance_id}", timeout=5) as r:
+              archive_jobs = json.load(r)["data"]
+          if len(archive_jobs) != 1 or archive_jobs[0]["status"] != "success":
+              raise SystemExit(f"archive job registration failed: {archive_jobs}")
+          if archive_jobs[0]["archived_rows"] != 100 or archive_jobs[0]["deleted_rows"] != 0:
+              raise SystemExit(f"archive row counters invalid: {archive_jobs[0]}")
+
+          open("/tmp/archive-task-id", "w").write(str(archive_task_id))
+          print("mysql.archive end-to-end OK", {
+              "task_id": archive_task_id,
+              "archive_job_id": archive_jobs[0]["id"],
+              "archived_rows": archive_jobs[0]["archived_rows"],
+          })
           PY
 
           python3 - <<'PY'
@@ -422,6 +504,15 @@ jobs:
           if not backup_row or backup_row[0] != "success" or backup_row[1] <= 0 or len(backup_row[2]) != 64:
               raise SystemExit(f"backup job facts invalid: {backup_row}")
           print("SQLite backup facts OK", backup_row[:3])
+
+          archive_task_id = int(open("/tmp/archive-task-id").read())
+          archive_params = cur.execute("select parameters_json from tasks where id=?", (archive_task_id,)).fetchone()[0]
+          if "root_password" in archive_params:
+              raise SystemExit("root password leaked into archive task parameters")
+          archive_row = cur.execute("select status,archived_rows,deleted_rows,verification_status from archive_jobs where task_id=?", (archive_task_id,)).fetchone()
+          if not archive_row or archive_row[0] != "success" or archive_row[1] != 100 or archive_row[2] != 0:
+              raise SystemExit(f"archive job facts invalid: {archive_row}")
+          print("SQLite archive facts OK", archive_row)
           PY
 
           test -s /tmp/dbops-mysql-ci/data/auto.cnf
