@@ -1,0 +1,313 @@
+name: PostgreSQL CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/postgres/**'
+      - 'internal/agentclient/postgres.go'
+      - 'internal/agentclient/filehash.go'
+      - 'internal/httpapi/**'
+      - 'internal/app/**'
+      - 'internal/repository/**'
+      - 'internal/actionpolicy/**'
+      - 'agent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/postgres-ci.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/postgres/**'
+      - 'internal/agentclient/postgres.go'
+      - 'internal/agentclient/filehash.go'
+      - 'internal/httpapi/**'
+      - 'internal/app/**'
+      - 'internal/repository/**'
+      - 'internal/actionpolicy/**'
+      - 'agent/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Build binaries
+        run: |
+          go build -o /tmp/dbops-server ./cmd/dbops-server
+          go build -o /tmp/dbops-agent ./cmd/dbops-agent
+
+      - name: Build fake PostgreSQL client
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dbops-postgres-ci
+          mkdir -p /tmp/dbops-postgres-ci/pg/bin /tmp/dbops-postgres-ci/agent /tmp/dbops-postgres-ci/server
+          printf '%s\n' 'postgres-bootstrap-token' >/tmp/dbops-postgres-ci/agent/bootstrap.token
+          chmod 600 /tmp/dbops-postgres-ci/agent/bootstrap.token
+
+          cat >/tmp/dbops-postgres-ci/pg/bin/psql <<'PY'
+          #!/usr/bin/env python3
+          import os, sys
+
+          args = sys.argv[1:]
+          query = ""
+          for i, arg in enumerate(args):
+              if arg == "--command" and i + 1 < len(args):
+                  query = args[i+1]
+                  break
+
+          pgpass = os.environ.get("PGPASSFILE", "")
+          if not pgpass or not os.path.exists(pgpass):
+              print("missing PGPASSFILE", file=sys.stderr)
+              sys.exit(2)
+          if oct(os.stat(pgpass).st_mode & 0o777) != "0o600":
+              print("bad PGPASSFILE mode", file=sys.stderr)
+              sys.exit(3)
+
+          if "current_setting('server_version')" in query:
+              print("STATUS|16.4|primary|2026-09-19 10:00:00")
+              sys.exit(0)
+
+          if "pg_stat_replication" in query:
+              print("ROLE|primary")
+              print("PRIMARY|standby1|127.0.0.1|streaming|async|00:00:00.001|00:00:00.002|00:00:00.003")
+              sys.exit(0)
+
+          print("unsupported query", file=sys.stderr)
+          print(query, file=sys.stderr)
+          sys.exit(4)
+          PY
+          chmod +x /tmp/dbops-postgres-ci/pg/bin/psql
+
+          cat >/tmp/dbops-postgres-ci/pg/bin/pg_dump <<'PY'
+          #!/usr/bin/env python3
+          import os, sys
+
+          args = sys.argv[1:]
+          output = ""
+          for i, arg in enumerate(args):
+              if arg == "--file" and i + 1 < len(args):
+                  output = args[i+1]
+                  break
+          if not output:
+              print("missing --file", file=sys.stderr)
+              sys.exit(2)
+
+          pgpass = os.environ.get("PGPASSFILE", "")
+          if not pgpass or not os.path.exists(pgpass):
+              print("missing PGPASSFILE", file=sys.stderr)
+              sys.exit(3)
+
+          os.makedirs(os.path.dirname(output), exist_ok=True)
+          with open(output, "wb") as fh:
+              fh.write(b"PGDMP")
+              fh.write(b"DBOPS-POSTGRES-CI\n" * 2048)
+          sys.exit(0)
+          PY
+          chmod +x /tmp/dbops-postgres-ci/pg/bin/pg_dump
+
+      - name: Start DBOps and Agent
+        shell: bash
+        run: |
+          cat >/tmp/dbops-postgres-ci/server.yaml <<'EOF'
+          server:
+            listen: 127.0.0.1:18084
+            public_url: http://127.0.0.1:18084
+            data_dir: /tmp/dbops-postgres-ci/server
+          storage:
+            metadata_db: /tmp/dbops-postgres-ci/server/dbops.db
+            metrics_db: /tmp/dbops-postgres-ci/server/metrics.db
+            software_dir: /tmp/dbops-postgres-ci/server/software
+            task_work_dir: /tmp/dbops-postgres-ci/server/task-work
+            log_dir: /tmp/dbops-postgres-ci/server/logs
+            platform_backup_dir: /tmp/dbops-postgres-ci/server/platform-backup
+          sqlite:
+            metadata_max_open_conns: 4
+            metrics_max_open_conns: 2
+          task:
+            workers: 2
+            scan_interval_seconds: 1
+            lease_seconds: 30
+          scheduler:
+            enabled: false
+          alert:
+            enabled: false
+          security:
+            master_key_env: DBOPS_MASTER_KEY
+            package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          auth:
+            enabled: false
+          agent_gateway:
+            heartbeat_timeout_seconds: 10
+            websocket_path: /api/v1/agent/ws
+            bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+            allow_insecure_registration: false
+          EOF
+
+          cat >/tmp/dbops-postgres-ci/agent.yaml <<'EOF'
+          server:
+            url: http://127.0.0.1:18084
+          agent:
+            id: postgres-ci-agent
+            heartbeat_seconds: 1
+            work_dir: /tmp/dbops-postgres-ci/agent
+            log_dir: /tmp/dbops-postgres-ci/agent/logs
+          security:
+            bootstrap_token_file: /tmp/dbops-postgres-ci/agent/bootstrap.token
+            credential_file: /tmp/dbops-postgres-ci/agent/agent.credential
+            verify_server_tls: true
+          executor:
+            max_concurrent_tasks: 2
+            allowed_actions_file: agent/agent-actions.yaml
+          EOF
+
+          DBOPS_MASTER_KEY='postgres-master-key-0123456789abcdef' \
+          DBOPS_PACKAGE_SIGNING_KEY='postgres-package-key-0123456789abcdef' \
+          DBOPS_AGENT_BOOTSTRAP_TOKEN='postgres-bootstrap-token' \
+            /tmp/dbops-server --config /tmp/dbops-postgres-ci/server.yaml >/tmp/dbops-postgres-ci/server.log 2>&1 &
+          echo $! >/tmp/dbops-postgres-ci/server.pid
+
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18084/api/v1/health >/dev/null && break
+            sleep 1
+          done
+
+          /tmp/dbops-agent --config /tmp/dbops-postgres-ci/agent.yaml >/tmp/dbops-postgres-ci/agent.log 2>&1 &
+          echo $! >/tmp/dbops-postgres-ci/agent.pid
+
+      - name: Verify PostgreSQL lifecycle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sqlite3, time, urllib.error, urllib.request
+
+          base = "http://127.0.0.1:18084/api/v1"
+
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=5) as r:
+                  return json.load(r)["data"]
+
+          def post(path, body, expected=200):
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=5) as r:
+                      status, payload = r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  status, payload = e.code, json.loads(e.read().decode())
+              if status != expected:
+                  raise SystemExit(f"POST {path}: expected={expected} got={status} payload={payload}")
+              return payload.get("data")
+
+          def wait_task(task_id):
+              last = None
+              for _ in range(120):
+                  last = get(f"/tasks/{task_id}")
+                  if last["status"] in ("success", "failed", "timeout", "cancelled"):
+                      return last
+                  time.sleep(0.25)
+              raise SystemExit(f"task timeout: {last}")
+
+          agent_id = None
+          for _ in range(40):
+              try:
+                  agents = get("/agents")
+                  if agents and agents[0]["status"] == "online":
+                      agent_id = agents[0]["id"]
+                      break
+              except Exception:
+                  pass
+              time.sleep(0.25)
+          if not agent_id:
+              raise SystemExit("PostgreSQL Agent did not register")
+
+          instance = post("/postgres/instances", {
+              "agent_id": agent_id,
+              "name": "PG-CI",
+              "bin_dir": "/tmp/dbops-postgres-ci/pg/bin",
+              "host": "127.0.0.1",
+              "port": 5432,
+              "database": "postgres",
+              "username": "postgres",
+              "password": "Pg-ci-password-123",
+          }, expected=201)
+          if instance["db_type"] != "postgres" or instance["managed_mode"] != "imported":
+              raise SystemExit(f"PostgreSQL onboarding invalid: {instance}")
+          instance_id = instance["id"]
+
+          status = get(f"/postgres/instances/{instance_id}/status")
+          if status["version"] != "16.4" or status["role"] != "primary":
+              raise SystemExit(f"PostgreSQL status invalid: {status}")
+
+          repl = get(f"/postgres/instances/{instance_id}/replication")
+          if repl["role"] != "primary" or not repl.get("replicas"):
+              raise SystemExit(f"PostgreSQL replication status invalid: {repl}")
+          if repl["replicas"][0]["state"] != "streaming":
+              raise SystemExit(f"PostgreSQL replica not streaming: {repl}")
+
+          task = post(f"/postgres/instances/{instance_id}/backups", {
+              "output_dir": "/tmp/dbops-postgres-ci/backups",
+              "file_name": "postgres-ci.dump",
+          }, expected=202)
+          final = wait_task(task["id"])
+          if final["status"] != "success":
+              raise SystemExit(f"PostgreSQL backup failed: {final}")
+          result = json.loads(final["result_json"])
+          if result.get("size_bytes", 0) <= 0 or len(result.get("sha256", "")) != 64:
+              raise SystemExit(f"PostgreSQL backup verification invalid: {result}")
+          if not os.path.exists(result["path"]):
+              raise SystemExit(f"PostgreSQL backup file missing: {result}")
+
+          backups = get(f"/postgres/backups?instance_id={instance_id}")
+          if len(backups) != 1 or backups[0]["backup_engine"] != "pg_dump" or backups[0]["status"] != "success":
+              raise SystemExit(f"PostgreSQL BackupJob invalid: {backups}")
+
+          steps = get(f"/tasks/{task['id']}/steps")
+          if len(steps) != 3 or any(x["status"] != "success" for x in steps):
+              raise SystemExit(f"PostgreSQL backup steps invalid: {steps}")
+
+          db = sqlite3.connect("/tmp/dbops-postgres-ci/server/dbops.db")
+          row = db.execute("""
+              select c.encrypted_secret,c.credential_type,d.metadata_json
+              from database_instances d join credentials c on c.id=d.credential_id
+              where d.id=?
+          """, (instance_id,)).fetchone()
+          if not row or row[1] != "postgres_admin" or len(row[0]) < 40:
+              raise SystemExit(f"PostgreSQL credential persistence invalid: {row}")
+          if "Pg-ci-password-123" in row[0] or "Pg-ci-password-123" in row[2]:
+              raise SystemExit("PostgreSQL password leaked into durable metadata")
+          params = db.execute("select parameters_json from tasks where task_type='postgres.backup'").fetchall()
+          if any("Pg-ci-password-123" in x[0] for x in params):
+              raise SystemExit("PostgreSQL password leaked into task parameters")
+
+          print("PostgreSQL end-to-end OK", {
+              "instance_id": instance_id,
+              "backup_task": task["id"],
+              "sha256": result["sha256"],
+              "replicas": len(repl["replicas"]),
+          })
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          if test -f /tmp/dbops-postgres-ci/agent.pid; then kill "$(cat /tmp/dbops-postgres-ci/agent.pid)" 2>/dev/null || true; fi
+          if test -f /tmp/dbops-postgres-ci/server.pid; then kill "$(cat /tmp/dbops-postgres-ci/server.pid)" 2>/dev/null || true; fi
+          echo "--- server log ---"
+          cat /tmp/dbops-postgres-ci/server.log 2>/dev/null || true
+          echo "--- agent log ---"
+          cat /tmp/dbops-postgres-ci/agent.log 2>/dev/null || true
