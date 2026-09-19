@@ -133,6 +133,10 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return postgresReplicationStatus(ctx, e.workDir, req.Params)
 	case "postgres.backup":
 		return postgresBackup(ctx, e.workDir, req.Params)
+	case "doris.cluster.status":
+		return dorisClusterStatus(ctx, e.workDir, req.Params)
+	case "doris.backup":
+		return dorisBackup(ctx, e.workDir, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
