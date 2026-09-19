@@ -227,6 +227,31 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, fmt.Errorf("bind server_id: %w", err)
 		}
 
+		instanceOutput, _ := json.Marshal(map[string]any{"instance_id": instance.ID, "host_id": instance.HostID, "port": instance.Port})
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 19, StepCode: "REGISTER_INSTANCE", StepName: "Register instance",
+			Status: "success", Progress: 96, OutputJSON: string(instanceOutput), RecoveryPolicy: "verify_before_retry",
+		})
+		_ = s.tasks.AddEvent(ctx, domain.TaskEvent{
+			TaskID: t.ID, EventType: "server_step", StepCode: "REGISTER_INSTANCE", Level: "INFO",
+			Message: "database instance registered", PayloadJSON: string(instanceOutput),
+		})
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 20, StepCode: "ENABLE_METRICS", StepName: "Enable metrics",
+			Status: "success", Progress: 98, OutputJSON: `{"discovery":"database_instances"}`, RecoveryPolicy: "verify_before_retry",
+		})
+		verified, verifyErr := s.dbs.Get(ctx, instance.ID)
+		if verifyErr != nil || verified.Status != "online" {
+			if verifyErr != nil {
+				return nil, fmt.Errorf("final verify: %w", verifyErr)
+			}
+			return nil, fmt.Errorf("final verify: instance status is %s", verified.Status)
+		}
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 21, StepCode: "FINAL_VERIFY", StepName: "Final verify",
+			Status: "success", Progress: 100, OutputJSON: `{"verified":true}`, RecoveryPolicy: "verify_before_retry",
+		})
+
 		return map[string]any{
 			"instance_id": instance.ID,
 			"name": instance.Name,
