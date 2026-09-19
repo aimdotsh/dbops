@@ -177,3 +177,21 @@ CREATE TABLE IF NOT EXISTS resource_locks (
   acquired_at TEXT NOT NULL,
   metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+
+
+CREATE TABLE IF NOT EXISTS backup_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+  database_instance_id INTEGER NOT NULL REFERENCES database_instances(id),
+  backup_engine TEXT NOT NULL,
+  backup_type TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  storage_path TEXT,
+  checksum TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_backup_jobs_instance_status ON backup_jobs(database_instance_id,status);
