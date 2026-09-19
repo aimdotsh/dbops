@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -48,6 +49,13 @@ type Config struct {
 		EvaluateSeconds int  `yaml:"evaluate_seconds"`
 	} `yaml:"alert"`
 
+	Security struct {
+		MasterKeyEnv          string `yaml:"master_key_env"`
+		PackageSigningKeyEnv  string `yaml:"package_signing_key_env"`
+		MasterKey             string `yaml:"-"`
+		PackageSigningKey     string `yaml:"-"`
+	} `yaml:"security"`
+
 	AgentGateway struct {
 		HeartbeatTimeoutSeconds   int    `yaml:"heartbeat_timeout_seconds"`
 		WebsocketPath             string `yaml:"websocket_path"`
@@ -60,6 +68,7 @@ type Config struct {
 func Default() Config {
 	var c Config
 	c.Server.Listen = "0.0.0.0:8080"
+	c.Server.PublicURL = "http://127.0.0.1:8080"
 	c.Server.DataDir = "/data/dbops"
 	c.Storage.MetadataDB = "/data/dbops/dbops.db"
 	c.Storage.MetricsDB = "/data/dbops/metrics.db"
@@ -79,6 +88,8 @@ func Default() Config {
 	c.Scheduler.ScanIntervalSeconds = 10
 	c.Alert.Enabled = true
 	c.Alert.EvaluateSeconds = 15
+	c.Security.MasterKeyEnv = "DBOPS_MASTER_KEY"
+	c.Security.PackageSigningKeyEnv = "DBOPS_PACKAGE_SIGNING_KEY"
 	c.AgentGateway.HeartbeatTimeoutSeconds = 90
 	c.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
 	c.AgentGateway.BootstrapTokenEnv = "DBOPS_AGENT_BOOTSTRAP_TOKEN"
@@ -99,9 +110,15 @@ func Load(path string) (Config, error) {
 			return cfg, err
 		}
 	}
+
 	if cfg.Server.DataDir == "" {
 		return cfg, errors.New("server.data_dir is required")
 	}
+	if cfg.Server.PublicURL == "" {
+		return cfg, errors.New("server.public_url is required")
+	}
+	cfg.Server.PublicURL = strings.TrimRight(cfg.Server.PublicURL, "/")
+
 	if cfg.Storage.MetadataDB == "" {
 		cfg.Storage.MetadataDB = filepath.Join(cfg.Server.DataDir, "dbops.db")
 	}
@@ -120,6 +137,21 @@ func Load(path string) (Config, error) {
 	cfg.AgentGateway.BootstrapToken = os.Getenv(cfg.AgentGateway.BootstrapTokenEnv)
 	if cfg.AgentGateway.BootstrapToken == "" && !cfg.AgentGateway.AllowInsecureRegistration {
 		return cfg, errors.New("agent bootstrap token is required; set the configured bootstrap token environment variable")
+	}
+
+	if cfg.Security.MasterKeyEnv == "" {
+		cfg.Security.MasterKeyEnv = "DBOPS_MASTER_KEY"
+	}
+	if cfg.Security.PackageSigningKeyEnv == "" {
+		cfg.Security.PackageSigningKeyEnv = "DBOPS_PACKAGE_SIGNING_KEY"
+	}
+	cfg.Security.MasterKey = os.Getenv(cfg.Security.MasterKeyEnv)
+	if len(cfg.Security.MasterKey) < 16 {
+		return cfg, errors.New("DBOps master key is required and must be at least 16 characters")
+	}
+	cfg.Security.PackageSigningKey = os.Getenv(cfg.Security.PackageSigningKeyEnv)
+	if cfg.Security.PackageSigningKey == "" {
+		cfg.Security.PackageSigningKey = cfg.Security.MasterKey
 	}
 	return cfg, nil
 }
