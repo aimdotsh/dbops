@@ -1,3 +1,35 @@
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  display_name TEXT,
+  email TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_login_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS roles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_roles (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  PRIMARY KEY(user_id,role_id)
+);
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id,expires_at);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS environments (id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, risk_level TEXT NOT NULL DEFAULT 'normal');
