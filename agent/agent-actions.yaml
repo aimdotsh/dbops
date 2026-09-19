@@ -10,97 +10,99 @@ security:
   secret_in_logs: forbidden
   action_allowlist: required
 common_request:
-  fields: [request_id, task_id, action, protocol_version, timeout_seconds, params]
+  fields: [request_id, task_id, action, risk, confirmed, protocol_version, timeout_seconds, params]
 common_response:
   fields: [request_id, task_id, status, progress, step, message, result, error]
 actions:
   - name: host.info
     timeout: 30
-    risk: read_only
+    risk: R0
   - name: host.disk.list
     timeout: 30
-    risk: read_only
+    risk: R0
   - name: host.port.check
     timeout: 10
-    risk: read_only
+    risk: R0
     params: [port]
   - name: host.directory.check
     timeout: 15
-    risk: read_only
+    risk: R0
     params: [path, require_empty, min_free_bytes]
   - name: mysql.precheck
     timeout: 120
-    risk: read_only
+    risk: R0
+    params: [port, data_dir, min_free_bytes, min_memory_bytes, min_cpu_cores, expected_os, expected_arch, service_name]
   - name: mysql.install
     timeout: 3600
-    risk: change
+    risk: R2
+    params: [port, data_dir, execute]
     idempotency_key: host_id+port
   - name: mysql.start
     timeout: 120
-    risk: change
+    risk: R1
   - name: mysql.stop
     timeout: 120
-    risk: high
+    risk: R3
   - name: mysql.restart
     timeout: 300
-    risk: high
+    risk: R3
   - name: mysql.replication.precheck
     timeout: 300
-    risk: read_only
+    risk: R0
   - name: mysql.replication.create
     timeout: 43200
-    risk: high
+    risk: R3
   - name: mysql.replication.status
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: mysql.backup
     timeout: 86400
-    risk: change
+    risk: R1
   - name: mysql.restore
     timeout: 86400
-    risk: critical
+    risk: R4
   - name: mysql.archive.precheck
     timeout: 600
-    risk: read_only
+    risk: R0
   - name: mysql.archive.start
     timeout: 86400
-    risk: high
+    risk: R3
   - name: mysql.archive.pause
     timeout: 60
-    risk: change
+    risk: R1
   - name: mysql.archive.resume
     timeout: 60
-    risk: change
+    risk: R1
   - name: mysql.archive.stop
     timeout: 60
-    risk: high
+    risk: R3
   - name: oracle.status
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: oracle.tablespace.list
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: oracle.datafile.list
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: oracle.datafile.add
     timeout: 600
-    risk: high
+    risk: R3
   - name: oracle.datafile.resize
     timeout: 600
-    risk: high
+    risk: R3
   - name: oracle.rman.backup
     timeout: 86400
-    risk: change
+    risk: R1
   - name: postgres.status
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: postgres.backup
     timeout: 86400
-    risk: change
+    risk: R1
   - name: doris.cluster.status
     timeout: 60
-    risk: read_only
+    risk: R0
   - name: doris.backup
     timeout: 86400
-    risk: change
+    risk: R1
