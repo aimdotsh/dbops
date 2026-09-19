@@ -465,67 +465,146 @@ jobs:
               "sha256": backups[0]["checksum"],
           })
 
-          archive_body = {
+          def api_post(path, body=None, expect_error=False):
+              data = json.dumps(body or {}).encode()
+              req = urllib.request.Request(
+                  base + path,
+                  data=data,
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      return json.load(r)["data"]
+              except urllib.error.HTTPError as e:
+                  if expect_error:
+                      return {"status": e.code, "body": e.read().decode()}
+                  raise
+
+          def wait_task(task_id, attempts=160):
+              final = None
+              for _ in range(attempts):
+                  with urllib.request.urlopen(base + f"/tasks/{task_id}", timeout=5) as r:
+                      final = json.load(r)["data"]
+                  if final["status"] in ("success", "failed", "timeout", "cancelled"):
+                      return final
+                  time.sleep(0.25)
+              raise SystemExit(f"task did not finish: {final}")
+
+          def get_jobs(policy_id):
+              with urllib.request.urlopen(base + f"/mysql/archive/jobs?policy_id={policy_id}", timeout=5) as r:
+                  return json.load(r)["data"]
+
+          policy_body = {
+              "name": "archive-fast",
+              "source_instance_id": instance_id,
               "source_database": "dbops_ci",
               "source_table": "t",
+              "where_template": "id < 100",
+              "destination_type": "same_instance",
               "destination_database": "dbops_ci",
               "destination_table": "t_archive",
-              "where": "id < 100",
-              "pt_archiver_path": "/tmp/dbops-mysql-ci/base/bin/pt-archiver",
               "batch_size": 1000,
               "txn_size": 1000,
               "sleep_ms": 10,
+              "max_replication_lag": 30,
               "delete_source": False,
+              "pt_archiver_path": "/tmp/dbops-mysql-ci/base/bin/pt-archiver",
           }
-          req = urllib.request.Request(
-              base + f"/mysql/instances/{instance_id}/archive/precheck",
-              data=json.dumps(archive_body).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=10) as r:
-              archive_precheck = json.load(r)["data"]
-          if archive_precheck.get("ok") is not True:
-              raise SystemExit(f"archive precheck failed: {archive_precheck}")
+          policy = api_post("/mysql/archive/policies", policy_body)
+          precheck = api_post(f"/mysql/archive/policies/{policy['id']}/precheck", {})
+          if precheck.get("ok") is not True:
+              raise SystemExit(f"archive policy precheck failed: {precheck}")
 
-          archive_body["confirmed"] = True
-          req = urllib.request.Request(
-              base + f"/mysql/instances/{instance_id}/archive",
-              data=json.dumps(archive_body).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=5) as r:
-              archive_task = json.load(r)["data"]
-          archive_task_id = archive_task["id"]
-
-          archive_final = None
-          for _ in range(120):
-              with urllib.request.urlopen(base + f"/tasks/{archive_task_id}", timeout=5) as r:
-                  archive_final = json.load(r)["data"]
-              if archive_final["status"] in ("success", "failed", "timeout", "cancelled"):
-                  break
-              time.sleep(0.5)
-          if not archive_final or archive_final["status"] != "success":
+          archive_task = api_post(f"/mysql/archive/policies/{policy['id']}/start", {"confirmed": True})
+          archive_final = wait_task(archive_task["id"])
+          if archive_final["status"] != "success":
               raise SystemExit(f"mysql.archive failed: {archive_final}")
 
-          with urllib.request.urlopen(base + f"/tasks/{archive_task_id}/steps", timeout=5) as r:
-              archive_steps = json.load(r)["data"]
+          archive_steps = get(f"/tasks/{archive_task['id']}/steps")
           if len(archive_steps) != 3 or any(s["status"] != "success" for s in archive_steps):
               raise SystemExit(f"archive steps invalid: {archive_steps}")
 
-          with urllib.request.urlopen(base + f"/mysql/archive/jobs?instance_id={instance_id}", timeout=5) as r:
-              archive_jobs = json.load(r)["data"]
+          archive_jobs = get_jobs(policy["id"])
           if len(archive_jobs) != 1 or archive_jobs[0]["status"] != "success":
               raise SystemExit(f"archive job registration failed: {archive_jobs}")
           if archive_jobs[0]["archived_rows"] != 100 or archive_jobs[0]["deleted_rows"] != 0:
               raise SystemExit(f"archive row counters invalid: {archive_jobs[0]}")
+          normal_job = archive_jobs[0]
 
-          open("/tmp/archive-task-id", "w").write(str(archive_task_id))
-          print("mysql.archive end-to-end OK", {
-              "task_id": archive_task_id,
-              "archive_job_id": archive_jobs[0]["id"],
-              "archived_rows": archive_jobs[0]["archived_rows"],
+          slow_policy_body = dict(policy_body)
+          slow_policy_body["name"] = "archive-pause-resume"
+          slow_policy_body["where_template"] = "id < 999999"
+          slow_policy = api_post("/mysql/archive/policies", slow_policy_body)
+          slow_task = api_post(f"/mysql/archive/policies/{slow_policy['id']}/start", {"confirmed": True})
+
+          slow_job = None
+          for _ in range(80):
+              jobs = get_jobs(slow_policy["id"])
+              if jobs and jobs[0]["status"] == "running":
+                  slow_job = jobs[0]
+                  break
+              time.sleep(0.25)
+          if not slow_job:
+              raise SystemExit(f"slow archive never entered running state: {get_jobs(slow_policy['id'])}")
+
+          pause_task = api_post(f"/mysql/archive/jobs/{slow_job['id']}/pause", {})
+          pause_final = wait_task(pause_task["id"])
+          if pause_final["status"] != "success":
+              raise SystemExit(f"archive pause control failed: {pause_final}")
+          slow_first = wait_task(slow_task["id"])
+          if slow_first["status"] != "success":
+              raise SystemExit(f"paused archive task failed: {slow_first}")
+
+          paused_job = get_jobs(slow_policy["id"])[0]
+          if paused_job["status"] != "paused" or paused_job["archived_rows"] != 25:
+              raise SystemExit(f"archive did not pause cleanly: {paused_job}")
+
+          resume_task = api_post(f"/mysql/archive/jobs/{slow_job['id']}/resume", {})
+          resume_final = wait_task(resume_task["id"])
+          if resume_final["status"] != "success":
+              raise SystemExit(f"archive resume failed: {resume_final}")
+          resumed_job = get_jobs(slow_policy["id"])[0]
+          if resumed_job["status"] != "success" or resumed_job["archived_rows"] != 100:
+              raise SystemExit(f"archive resume counters invalid: {resumed_job}")
+
+          stop_policy_body = dict(slow_policy_body)
+          stop_policy_body["name"] = "archive-stop"
+          stop_policy = api_post("/mysql/archive/policies", stop_policy_body)
+          stop_run_task = api_post(f"/mysql/archive/policies/{stop_policy['id']}/start", {"confirmed": True})
+
+          stop_job = None
+          for _ in range(80):
+              jobs = get_jobs(stop_policy["id"])
+              if jobs and jobs[0]["status"] == "running":
+                  stop_job = jobs[0]
+                  break
+              time.sleep(0.25)
+          if not stop_job:
+              raise SystemExit("stop archive never entered running state")
+
+          rejected = api_post(f"/mysql/archive/jobs/{stop_job['id']}/stop", {"confirmed": False}, expect_error=True)
+          if rejected.get("status") != 400:
+              raise SystemExit(f"R3 archive stop should be rejected without confirmation: {rejected}")
+
+          stop_task = api_post(f"/mysql/archive/jobs/{stop_job['id']}/stop", {"confirmed": True})
+          stop_control = wait_task(stop_task["id"])
+          if stop_control["status"] != "success":
+              raise SystemExit(f"archive stop control failed: {stop_control}")
+          stop_run = wait_task(stop_run_task["id"])
+          if stop_run["status"] != "success":
+              raise SystemExit(f"stopped archive task failed unexpectedly: {stop_run}")
+          stopped_job = get_jobs(stop_policy["id"])[0]
+          if stopped_job["status"] != "stopped":
+              raise SystemExit(f"archive stop state invalid: {stopped_job}")
+
+          open("/tmp/archive-task-id", "w").write(str(archive_task["id"]))
+          open("/tmp/archive-job-id", "w").write(str(normal_job["id"]))
+          open("/tmp/archive-policy-id", "w").write(str(policy["id"]))
+          print("mysql.archive policy/job end-to-end OK", {
+              "normal_job": normal_job["id"],
+              "pause_resume_job": slow_job["id"],
+              "stopped_job": stop_job["id"],
           })
           PY
 
