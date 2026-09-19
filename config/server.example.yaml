@@ -31,6 +31,13 @@ alert:
   enabled: true
   evaluate_seconds: 15
 
+security:
+  master_key_env: DBOPS_MASTER_KEY
+  package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+
+mysql_install:
+  allow_process_mode: false
+
 agent_gateway:
   heartbeat_timeout_seconds: 90
   websocket_path: /api/v1/agent/ws
