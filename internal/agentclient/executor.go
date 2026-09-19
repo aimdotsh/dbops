@@ -260,7 +260,28 @@ func uint64Param(params map[string]any, key string) (uint64, error) {
 			return 0, fmt.Errorf("%s must be non-negative", key)
 		}
 		return uint64(n), nil
+	case float32:
+		if n < 0 {
+			return 0, fmt.Errorf("%s must be non-negative", key)
+		}
+		return uint64(n), nil
+	case uint64:
+		return n, nil
+	case uint:
+		return uint64(n), nil
+	case uint32:
+		return uint64(n), nil
+	case int64:
+		if n < 0 {
+			return 0, fmt.Errorf("%s must be non-negative", key)
+		}
+		return uint64(n), nil
 	case int:
+		if n < 0 {
+			return 0, fmt.Errorf("%s must be non-negative", key)
+		}
+		return uint64(n), nil
+	case int32:
 		if n < 0 {
 			return 0, fmt.Errorf("%s must be non-negative", key)
 		}
