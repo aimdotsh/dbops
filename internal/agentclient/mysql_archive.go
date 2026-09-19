@@ -32,13 +32,27 @@ func mysqlArchivePrecheck(ctx context.Context, workDir string, params map[string
 		return map[string]any{"ok": false, "reason": "source table has no primary key"}, nil
 	}
 
-	defaults, cleanup, err := archiveDefaultsFile(workDir, runDir, password)
+	sourceDefaults, sourceCleanup, err := archiveDefaultsFile(workDir, "src", runDir, password)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
+	defer sourceCleanup()
 
-	args := archiveBaseArgs(defaults, sourceDB, sourceTable, destDB, destTable, where)
+	destDefaults := sourceDefaults
+	destCleanup := func() {}
+	if destPassword, _ := params["destination_password"].(string); destPassword != "" {
+		destRunDir, _ := params["destination_run_dir"].(string)
+		if destRunDir == "" {
+			return nil, errors.New("destination_run_dir is required for a separate destination instance")
+		}
+		destDefaults, destCleanup, err = archiveDefaultsFile(workDir, "dst", destRunDir, destPassword)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer destCleanup()
+
+	args := archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where)
 	args = append(args, "--dry-run", "--no-delete")
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, toolPath, args...)
@@ -68,6 +82,10 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	if err != nil {
 		return nil, err
 	}
+	jobID, err := intParam(params, "archive_job_id")
+	if err != nil || jobID <= 0 {
+		return nil, errors.New("archive_job_id is required")
+	}
 	limit, err := intParamDefault(params, "batch_size", 5000)
 	if err != nil || limit < 1 || limit > 100000 {
 		return nil, errors.New("invalid batch_size")
@@ -82,20 +100,44 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	}
 	deleteSource, _ := params["delete_source"].(bool)
 
-	defaults, cleanup, err := archiveDefaultsFile(workDir, runDir, password)
+	sourceDefaults, sourceCleanup, err := archiveDefaultsFile(workDir, "src", runDir, password)
 	if err != nil {
 		return nil, err
 	}
-	defer cleanup()
+	defer sourceCleanup()
 
-	args := archiveBaseArgs(defaults, sourceDB, sourceTable, destDB, destTable, where)
+	destDefaults := sourceDefaults
+	destCleanup := func() {}
+	if destPassword, _ := params["destination_password"].(string); destPassword != "" {
+		destRunDir, _ := params["destination_run_dir"].(string)
+		if destRunDir == "" {
+			return nil, errors.New("destination_run_dir is required for a separate destination instance")
+		}
+		destDefaults, destCleanup, err = archiveDefaultsFile(workDir, "dst", destRunDir, destPassword)
+		if err != nil {
+			return nil, err
+		}
+	}
+	defer destCleanup()
+
+	sentinel, err := archiveSentinelPath(workDir, jobID)
+	if err != nil {
+		return nil, err
+	}
+	_ = os.Remove(sentinel)
+
+	args := archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where)
 	args = append(args,
 		"--limit", strconv.Itoa(limit),
 		"--txn-size", strconv.Itoa(txnSize),
 		"--sleep", fmt.Sprintf("%.3f", float64(sleepMS)/1000.0),
 		"--statistics",
 		"--progress", strconv.Itoa(limit),
+		"--sentinel", sentinel,
 	)
+	if maxLag, err := intParamDefault(params, "max_replication_lag", 0); err == nil && maxLag > 0 {
+		args = append(args, "--max-lag", strconv.Itoa(maxLag))
+	}
 	if !deleteSource {
 		args = append(args, "--no-delete")
 	}
@@ -107,17 +149,71 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("pt-archiver failed: %w: %s", err, trimOutput(out.String(), 16384))
 	}
+
+	state := "completed"
+	pauseReason := ""
+	if b, readErr := os.ReadFile(sentinel); readErr == nil {
+		mode := strings.TrimSpace(string(b))
+		switch mode {
+		case "pause":
+			state = "paused"
+			pauseReason = "operator requested pause"
+		case "stop":
+			state = "stopped"
+			pauseReason = "operator requested stop"
+		}
+	}
 	scanned, archived, deleted := parseArchiveStats(out.String(), deleteSource)
 	return map[string]any{
-		"status":        "completed",
-		"scanned_rows":  scanned,
-		"archived_rows": archived,
-		"deleted_rows":  deleted,
-		"failed_rows":   int64(0),
-		"delete_source": deleteSource,
-		"statistics":    trimOutput(out.String(), 16384),
-		"verification":  "command_completed",
+		"status":         state,
+		"scanned_rows":   scanned,
+		"archived_rows":  archived,
+		"deleted_rows":   deleted,
+		"failed_rows":    int64(0),
+		"delete_source":  deleteSource,
+		"statistics":     trimOutput(out.String(), 16384),
+		"verification":   "command_completed",
+		"pause_reason":   pauseReason,
+		"sentinel_path":  sentinel,
 	}, nil
+}
+
+func mysqlArchiveControl(workDir, action string, params map[string]any) (map[string]any, error) {
+	jobID, err := intParam(params, "archive_job_id")
+	if err != nil || jobID <= 0 {
+		return nil, errors.New("archive_job_id is required")
+	}
+	path, err := archiveSentinelPath(workDir, jobID)
+	if err != nil {
+		return nil, err
+	}
+	switch action {
+	case "mysql.archive.pause":
+		if err := os.WriteFile(path, []byte("pause\n"), 0o600); err != nil {
+			return nil, err
+		}
+		return map[string]any{"archive_job_id": jobID, "state": "pause_requested"}, nil
+	case "mysql.archive.stop":
+		if err := os.WriteFile(path, []byte("stop\n"), 0o600); err != nil {
+			return nil, err
+		}
+		return map[string]any{"archive_job_id": jobID, "state": "stop_requested"}, nil
+	case "mysql.archive.resume":
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+		return map[string]any{"archive_job_id": jobID, "state": "resume_ready"}, nil
+	default:
+		return nil, fmt.Errorf("unsupported archive control %q", action)
+	}
+}
+
+func archiveSentinelPath(workDir string, jobID int) (string, error) {
+	dir := filepath.Join(workDir, "archive-control")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, fmt.Sprintf("archive-%d.stop", jobID)), nil
 }
 
 func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTable, where, toolPath string, err error) {
@@ -154,22 +250,22 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 	return sourceDB, sourceTable, destDB, destTable, where, toolPath, nil
 }
 
-func archiveBaseArgs(defaults, sourceDB, sourceTable, destDB, destTable, where string) []string {
+func archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where string) []string {
 	args := []string{
-		"--source", fmt.Sprintf("F=%s,D=%s,t=%s", defaults, sourceDB, sourceTable),
+		"--source", fmt.Sprintf("F=%s,D=%s,t=%s", sourceDefaults, sourceDB, sourceTable),
 		"--where", where,
 	}
 	if destDB != "" && destTable != "" {
-		args = append(args, "--dest", fmt.Sprintf("F=%s,D=%s,t=%s", defaults, destDB, destTable))
+		args = append(args, "--dest", fmt.Sprintf("F=%s,D=%s,t=%s", destDefaults, destDB, destTable))
 	}
 	return args
 }
 
-func archiveDefaultsFile(workDir, runDir, password string) (string, func(), error) {
+func archiveDefaultsFile(workDir, prefix, runDir, password string) (string, func(), error) {
 	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		return "", nil, err
 	}
-	f, err := os.CreateTemp(workDir, "pt-archiver-*.cnf")
+	f, err := os.CreateTemp(workDir, prefix+"-pt-archiver-*.cnf")
 	if err != nil {
 		return "", nil, err
 	}
