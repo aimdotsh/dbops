@@ -2,6 +2,12 @@ package agentgateway
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +20,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/agentproto"
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/repository"
+	"github.com/aimdotsh/dbops/internal/security"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -23,6 +30,8 @@ type Gateway struct {
 	tasks            repository.TaskRepository
 	logger           *slog.Logger
 	heartbeatTimeout time.Duration
+	bootstrapToken   string
+	allowInsecure    bool
 
 	mu      sync.RWMutex
 	clients map[int64]*client
@@ -39,7 +48,14 @@ type client struct {
 	lastSeen  atomic.Int64
 }
 
-func New(agents repository.AgentRepository, tasks repository.TaskRepository, logger *slog.Logger, heartbeatTimeoutSeconds int) *Gateway {
+func New(
+	agents repository.AgentRepository,
+	tasks repository.TaskRepository,
+	logger *slog.Logger,
+	heartbeatTimeoutSeconds int,
+	bootstrapToken string,
+	allowInsecure bool,
+) *Gateway {
 	if heartbeatTimeoutSeconds <= 0 {
 		heartbeatTimeoutSeconds = 90
 	}
@@ -48,6 +64,8 @@ func New(agents repository.AgentRepository, tasks repository.TaskRepository, log
 		tasks:            tasks,
 		logger:           logger,
 		heartbeatTimeout: time.Duration(heartbeatTimeoutSeconds) * time.Second,
+		bootstrapToken:   bootstrapToken,
+		allowInsecure:    allowInsecure,
 		clients:          make(map[int64]*client),
 	}
 }
@@ -93,19 +111,24 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if env.Type != "hello" {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "hello required"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		g.reject(conn, "hello required")
 		return
 	}
 
 	var hello agentproto.Hello
 	if err := json.Unmarshal(env.Data, &hello); err != nil || hello.AgentUUID == "" {
-		_ = conn.Close()
+		g.reject(conn, "invalid hello")
 		return
 	}
 	if hello.ProtocolVersion != agentproto.ProtocolVersion {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "protocol mismatch"), time.Now().Add(time.Second))
-		_ = conn.Close()
+		g.reject(conn, "protocol mismatch")
+		return
+	}
+
+	enrolled, err := g.authenticate(r.Context(), hello)
+	if err != nil {
+		g.logger.Warn("agent authentication rejected", "uuid", hello.AgentUUID, "error", err)
+		g.reject(conn, "authentication failed")
 		return
 	}
 
@@ -120,6 +143,21 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 		return
 	}
+
+	credential := ""
+	if !enrolled {
+		credential, err = generateCredential()
+		if err != nil {
+			_ = conn.Close()
+			return
+		}
+		if err := g.agents.SetCredentialHash(r.Context(), hello.AgentUUID, credentialHash(credential)); err != nil {
+			g.logger.Error("persist agent credential", "uuid", hello.AgentUUID, "error", err)
+			_ = conn.Close()
+			return
+		}
+	}
+
 	if _, err := g.agents.BindHostByIdentity(r.Context(), hello.AgentUUID, hello.Hostname, hello.IPAddress); err != nil {
 		g.logger.Warn("bind agent host", "uuid", hello.AgentUUID, "error", err)
 	}
@@ -134,12 +172,65 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		done:    make(chan struct{}),
 	}
 	c.lastSeen.Store(time.Now().UnixNano())
+
+	if err := c.writeEnvelope("registered", agentproto.Registration{
+		AgentID: agent.ID, AgentUUID: agent.AgentUUID, Credential: credential,
+	}); err != nil {
+		_ = conn.Close()
+		return
+	}
 	_ = conn.SetReadDeadline(time.Time{})
 
 	g.register(c)
-	g.logger.Info("agent connected", "agent_id", agent.ID, "uuid", agent.AgentUUID, "host_id", agent.HostID)
+	g.logger.Info("agent connected", "agent_id", agent.ID, "uuid", agent.AgentUUID, "host_id", agent.HostID, "new_enrollment", !enrolled)
 	g.readLoop(r.Context(), c)
 	g.unregister(c)
+}
+
+func (g *Gateway) authenticate(ctx context.Context, hello agentproto.Hello) (bool, error) {
+	hash, err := g.agents.GetCredentialHash(ctx, hello.AgentUUID)
+	if err == nil && hash != "" {
+		if hello.Auth.Credential == "" || !secureEqual(hash, credentialHash(hello.Auth.Credential)) {
+			return false, errors.New("invalid persistent credential")
+		}
+		return true, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+
+	if g.allowInsecure {
+		return false, nil
+	}
+	if g.bootstrapToken == "" {
+		return false, errors.New("bootstrap registration disabled")
+	}
+	if hello.Auth.BootstrapToken == "" || !secureEqual(credentialHash(g.bootstrapToken), credentialHash(hello.Auth.BootstrapToken)) {
+		return false, errors.New("invalid bootstrap token")
+	}
+	return false, nil
+}
+
+func generateCredential() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func credentialHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func secureEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func (g *Gateway) reject(conn *websocket.Conn, reason string) {
+	_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, reason), time.Now().Add(time.Second))
+	_ = conn.Close()
 }
 
 func (g *Gateway) Dispatch(ctx context.Context, agentID int64, req agentproto.ActionRequest) (agentproto.ActionResponse, error) {
@@ -147,7 +238,6 @@ func (g *Gateway) Dispatch(ctx context.Context, agentID int64, req agentproto.Ac
 	if c == nil {
 		return agentproto.ActionResponse{}, fmt.Errorf("agent %d offline", agentID)
 	}
-
 	if req.RequestID == "" {
 		req.RequestID = uuid.NewString()
 	}
@@ -174,7 +264,6 @@ func (g *Gateway) Dispatch(ctx context.Context, agentID int64, req agentproto.Ac
 
 	timer := time.NewTimer(time.Duration(req.TimeoutSeconds) * time.Second)
 	defer timer.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -246,6 +335,7 @@ func (g *Gateway) recordResponse(ctx context.Context, resp agentproto.ActionResp
 	_ = g.tasks.UpdateProgress(ctx, resp.TaskID, resp.Progress)
 
 	payload, _ := json.Marshal(resp.Result)
+	payload = security.RedactJSONBytes(payload)
 	_ = g.tasks.AddEvent(ctx, domain.TaskEvent{
 		TaskID:      resp.TaskID,
 		EventType:   "agent_response",
@@ -320,7 +410,6 @@ func (g *Gateway) closeStale() {
 		clients = append(clients, c)
 	}
 	g.mu.RUnlock()
-
 	for _, c := range clients {
 		last := time.Unix(0, c.lastSeen.Load())
 		if now.Sub(last) > g.heartbeatTimeout {
