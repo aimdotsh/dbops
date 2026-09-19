@@ -11,6 +11,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
+	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	"github.com/aimdotsh/dbops/internal/repository"
 	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/gin-gonic/gin"
@@ -25,6 +26,7 @@ type Server struct {
 	software         *software.Service
 	mysqlInstaller   *mysqlinstall.Service
 	mysqlReplication *mysqlreplication.Service
+	mysqlService *mysqlservice.Service
 }
 
 func New(
@@ -36,6 +38,7 @@ func New(
 	softwareService *software.Service,
 	mysqlInstaller *mysqlinstall.Service,
 	mysqlReplication *mysqlreplication.Service,
+	mysqlService *mysqlservice.Service,
 	agentWS http.Handler,
 	websocketPath string,
 ) *Server {
@@ -43,7 +46,7 @@ func New(
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlReplication: mysqlReplication}
+	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/health", s.health)
@@ -60,6 +63,9 @@ func New(
 	v1.GET("/mysql/replications", s.listMySQLReplications)
 	v1.POST("/mysql/replications", s.createMySQLReplication)
 	v1.POST("/mysql/replications/:id/refresh", s.refreshMySQLReplication)
+	v1.POST("/mysql/instances/:id/start", s.startMySQLInstance)
+	v1.POST("/mysql/instances/:id/stop", s.stopMySQLInstance)
+	v1.POST("/mysql/instances/:id/restart", s.restartMySQLInstance)
 	v1.GET("/tasks", s.listTasks)
 	v1.POST("/tasks", s.createTask)
 	v1.GET("/tasks/:id", s.getTask)
