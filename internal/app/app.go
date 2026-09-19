@@ -68,6 +68,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		taskRepo,
 		logger,
 		cfg.AgentGateway.HeartbeatTimeoutSeconds,
+		cfg.AgentGateway.BootstrapToken,
+		cfg.AgentGateway.AllowInsecureRegistration,
 	)
 
 	taskEngine := task.New(
