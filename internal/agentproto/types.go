@@ -48,9 +48,10 @@ type ActionRequest struct {
 }
 
 type Step struct {
-	No   int    `json:"no,omitempty"`
-	Code string `json:"code,omitempty"`
-	Name string `json:"name,omitempty"`
+	No     int    `json:"no,omitempty"`
+	Code   string `json:"code,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 type ActionResponse struct {
