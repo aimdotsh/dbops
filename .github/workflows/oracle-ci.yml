@@ -85,6 +85,14 @@ jobs:
               print("19.21.0.0.0|READ WRITE|PRIMARY|2026-09-19 09:00:00")
               sys.exit(0)
 
+          if "FROM v$dataguard_stats" in script and "FROM v$managed_standby" in script:
+              print("ROLE|PHYSICAL STANDBY|READ ONLY WITH APPLY")
+              print("LAG|apply lag|+00 00:00:03|day(2) to second(0) interval")
+              print("LAG|transport lag|+00 00:00:01|day(2) to second(0) interval")
+              print("PROC|MRP0|APPLYING_LOG|1|12345")
+              print("PROC|RFS|IDLE|1|12346")
+              sys.exit(0)
+
           if "FROM dba_tablespaces t" in script:
               total = sum(x["bytes"] for x in state["datafiles"] if x["tablespace"] == "USERS")
               free = total // 2
@@ -152,6 +160,35 @@ jobs:
           sys.exit(4)
           PY
           chmod +x /tmp/dbops-oracle-ci/oracle/bin/sqlplus
+
+          cat >/tmp/dbops-oracle-ci/oracle/bin/rman <<'PY'
+          #!/usr/bin/env python3
+          import os, re, sys, time
+
+          cmdfile = next((x.split("=",1)[1] for x in sys.argv[1:] if x.startswith("cmdfile=")), "")
+          logpath = next((x.split("=",1)[1] for x in sys.argv[1:] if x.startswith("log=")), "")
+          if not cmdfile or not os.path.exists(cmdfile):
+              sys.exit(2)
+          script = open(cmdfile).read()
+          formats = re.findall(r"FORMAT '([^']+)'", script, re.I)
+          if not formats:
+              sys.exit(3)
+          created = []
+          for idx, fmt in enumerate(formats, 1):
+              path = fmt.replace("%T", "20260919").replace("%U", f"CI{idx:04d}")
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              with open(path, "wb") as fh:
+                  fh.write((f"DBOPS-RMAN-PIECE-{idx}\n" * 1024).encode())
+              created.append(path)
+          if logpath:
+              os.makedirs(os.path.dirname(logpath), exist_ok=True)
+              with open(logpath, "w") as log:
+                  log.write("Recovery Manager complete.\n")
+                  for path in created:
+                      log.write("piece handle=" + path + "\n")
+          sys.exit(0)
+          PY
+          chmod +x /tmp/dbops-oracle-ci/oracle/bin/rman
 
       - name: Start DBOps and Agent
         shell: bash
@@ -286,6 +323,12 @@ jobs:
           if status["open_mode"] != "READ WRITE" or status["database_role"] != "PRIMARY":
               raise SystemExit(f"Oracle status invalid: {status}")
 
+          dg = get(f"/oracle/instances/{instance_id}/dataguard")
+          if dg["database_role"] != "PHYSICAL STANDBY" or dg["apply_lag"] != "+00 00:00:03":
+              raise SystemExit(f"Data Guard status invalid: {dg}")
+          if not any(x.get("process") == "MRP0" and x.get("status") == "APPLYING_LOG" for x in dg.get("processes", [])):
+              raise SystemExit(f"MRP0 status missing: {dg}")
+
           spaces = get(f"/oracle/instances/{instance_id}/tablespaces")
           if not spaces or spaces[0]["tablespace"] != "USERS":
               raise SystemExit(f"tablespace query invalid: {spaces}")
@@ -339,6 +382,25 @@ jobs:
           if shrink_final["status"] != "failed" or "only permits datafile growth" not in (shrink_final.get("error_message") or ""):
               raise SystemExit(f"datafile shrink guard failed: {shrink_final}")
 
+
+          rman_task = post(f"/oracle/instances/{instance_id}/backups/rman", {
+              "backup_type": "full",
+              "output_dir": "/tmp/dbops-oracle-ci/rman-backups",
+          }, expected=202)
+          rman_final = wait_task(rman_task["id"])
+          if rman_final["status"] != "success":
+              raise SystemExit(f"RMAN backup failed: {rman_final}")
+          rman_result = json.loads(rman_final["result_json"])
+          if rman_result.get("piece_count", 0) < 2 or len(rman_result.get("manifest_sha256", "")) != 64:
+              raise SystemExit(f"RMAN verification invalid: {rman_result}")
+
+          backups = get(f"/mysql/backups?instance_id={instance_id}")
+          oracle_backups = [x for x in backups if x.get("backup_engine") == "rman"]
+          if len(oracle_backups) != 1 or oracle_backups[0]["status"] != "success":
+              raise SystemExit(f"RMAN BackupJob missing: {backups}")
+          if oracle_backups[0]["size_bytes"] <= 0 or len(oracle_backups[0]["checksum"]) != 64:
+              raise SystemExit(f"RMAN BackupJob checksum invalid: {oracle_backups[0]}")
+
           db = sqlite3.connect("/tmp/dbops-oracle-ci/server/dbops.db")
           row = db.execute("""
               select c.encrypted_secret,c.credential_type,d.metadata_json
@@ -360,6 +422,8 @@ jobs:
               "datafiles": len(files),
               "add_task": add_task["id"],
               "resize_task": resize_task["id"],
+              "rman_task": rman_task["id"],
+              "rman_pieces": rman_result["piece_count"],
           })
           PY
 
