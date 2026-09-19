@@ -21,6 +21,7 @@ type Config struct {
 	} `yaml:"agent"`
 	Security struct {
 		BootstrapTokenFile string `yaml:"bootstrap_token_file"`
+		CredentialFile     string `yaml:"credential_file"`
 		VerifyServerTLS    bool   `yaml:"verify_server_tls"`
 	} `yaml:"security"`
 	Executor struct {
@@ -55,6 +56,9 @@ func LoadConfig(path string) (Config, error) {
 	if cfg.Executor.MaxConcurrentTasks <= 0 {
 		cfg.Executor.MaxConcurrentTasks = 2
 	}
+	if cfg.Security.CredentialFile == "" {
+		cfg.Security.CredentialFile = filepath.Join(cfg.Agent.WorkDir, "agent.credential")
+	}
 	return cfg, nil
 }
 
@@ -76,6 +80,36 @@ func ResolveAgentID(cfg Config) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+func LoadAuth(cfg Config) (credential, bootstrap string, err error) {
+	if b, readErr := os.ReadFile(cfg.Security.CredentialFile); readErr == nil {
+		if value := string(bytesTrimSpace(b)); value != "" {
+			return value, "", nil
+		}
+	}
+	if cfg.Security.BootstrapTokenFile == "" {
+		return "", "", fmt.Errorf("no agent credential and bootstrap_token_file is not configured")
+	}
+	b, err := os.ReadFile(cfg.Security.BootstrapTokenFile)
+	if err != nil {
+		return "", "", err
+	}
+	value := string(bytesTrimSpace(b))
+	if value == "" {
+		return "", "", fmt.Errorf("bootstrap token file is empty")
+	}
+	return "", value, nil
+}
+
+func SaveCredential(cfg Config, credential string) error {
+	if credential == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(cfg.Security.CredentialFile), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(cfg.Security.CredentialFile, []byte(credential+"\n"), 0o600)
 }
 
 func bytesTrimSpace(b []byte) []byte {
