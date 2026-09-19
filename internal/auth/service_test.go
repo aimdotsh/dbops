@@ -60,10 +60,10 @@ func TestBootstrapLoginRefreshRotation(t *testing.T) {
 
 	repo := sqlite.AuthRepo{DB: db}
 	svc, err := New(repo, Config{
-		Enabled: true,
-		JWTSecret: "0123456789abcdef0123456789abcdef",
-		AccessTTL: time.Minute,
-		RefreshTTL: time.Hour,
+		Enabled:                true,
+		JWTSecret:              "0123456789abcdef0123456789abcdef",
+		AccessTTL:              time.Minute,
+		RefreshTTL:             time.Hour,
 		BootstrapAdminUsername: "admin",
 		BootstrapAdminPassword: "A-strong-test-password-123",
 	})
@@ -112,10 +112,10 @@ func TestCreateUserRoleAndLogin(t *testing.T) {
 
 	repo := sqlite.AuthRepo{DB: db}
 	svc, err := New(repo, Config{
-		Enabled: true,
-		JWTSecret: "0123456789abcdef0123456789abcdef",
-		AccessTTL: time.Minute,
-		RefreshTTL: time.Hour,
+		Enabled:                true,
+		JWTSecret:              "0123456789abcdef0123456789abcdef",
+		AccessTTL:              time.Minute,
+		RefreshTTL:             time.Hour,
 		BootstrapAdminUsername: "admin",
 		BootstrapAdminPassword: "A-strong-test-password-123",
 	})

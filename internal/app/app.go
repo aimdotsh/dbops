@@ -76,10 +76,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	authRepo := reposqlite.AuthRepo{DB: stores.Metadata}
 	authService, err := authsvc.New(authRepo, authsvc.Config{
-		Enabled: cfg.Auth.Enabled,
-		JWTSecret: cfg.Auth.JWTSecret,
-		AccessTTL: time.Duration(cfg.Auth.AccessMinutes) * time.Minute,
-		RefreshTTL: time.Duration(cfg.Auth.RefreshHours) * time.Hour,
+		Enabled:                cfg.Auth.Enabled,
+		JWTSecret:              cfg.Auth.JWTSecret,
+		AccessTTL:              time.Duration(cfg.Auth.AccessMinutes) * time.Minute,
+		RefreshTTL:             time.Duration(cfg.Auth.RefreshHours) * time.Hour,
 		BootstrapAdminUsername: cfg.Auth.BootstrapAdminUsername,
 		BootstrapAdminPassword: cfg.Auth.BootstrapAdminPassword,
 	})
