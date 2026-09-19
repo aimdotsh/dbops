@@ -4,12 +4,14 @@ import { getData } from '../api'
 
 const tasks = ref<any[]>([])
 const selected = ref<any | null>(null)
+const drawer = ref(false)
 const steps = ref<any[]>([])
 const events = ref<any[]>([])
 
 async function load() { tasks.value = await getData<any[]>('/tasks') }
 async function open(row: any) {
   selected.value = row
+  drawer.value = true
   ;[steps.value, events.value] = await Promise.all([
     getData<any[]>(`/tasks/${row.id}/steps`),
     getData<any[]>(`/tasks/${row.id}/events`),
@@ -32,7 +34,7 @@ onMounted(load)
       </el-table>
     </el-card>
 
-    <el-drawer v-model="selected" size="60%" :title="selected ? `Task #${selected.id} · ${selected.task_type}` : 'Task'">
+    <el-drawer v-model="drawer" size="60%" :title="selected ? `Task #${selected.id} · ${selected.task_type}` : 'Task'">
       <h3>Steps</h3>
       <el-table :data="steps" size="small">
         <el-table-column prop="step_no" label="#" width="55" />
