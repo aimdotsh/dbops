@@ -297,7 +297,7 @@ func (s *Service) loadRuntime(ctx context.Context, id int64) (runtime, error) {
 	return runtime{Instance: inst, Agent: agent, Host: host, BaseDir: meta.InstallResult.BaseDir, RunDir: meta.InstallResult.RunDir, Password: password}, nil
 }
 
-func (s *Service) dispatchPrecheck(ctx context.Context, taskID int64, rt runtime) (map[string]any, error) {
+func (s *Service) dispatchPrecheck(ctx context.Context, _ int64, rt runtime) (map[string]any, error) {
 	p, _ := actionpolicy.Get("mysql.replication.precheck")
 	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: taskID, Action: "mysql.replication.precheck", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 120, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
 	if err != nil {
@@ -306,7 +306,7 @@ func (s *Service) dispatchPrecheck(ctx context.Context, taskID int64, rt runtime
 	v, _ := resp.Result.(map[string]any)
 	return v, nil
 }
-func (s *Service) dispatchCreate(ctx context.Context, taskID int64, rt runtime, extra map[string]any) (map[string]any, error) {
+func (s *Service) dispatchCreate(ctx context.Context, _ int64, rt runtime, extra map[string]any) (map[string]any, error) {
 	p, _ := actionpolicy.Get("mysql.replication.create")
 	params := map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}
 	for k, v := range extra {
@@ -319,7 +319,7 @@ func (s *Service) dispatchCreate(ctx context.Context, taskID int64, rt runtime, 
 	v, _ := resp.Result.(map[string]any)
 	return v, nil
 }
-func (s *Service) dispatchStatus(ctx context.Context, taskID int64, rt runtime) (map[string]any, error) {
+func (s *Service) dispatchStatus(ctx context.Context, _ int64, rt runtime) (map[string]any, error) {
 	p, _ := actionpolicy.Get("mysql.replication.status")
 	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: taskID, Action: "mysql.replication.status", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 60, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
 	if err != nil {
