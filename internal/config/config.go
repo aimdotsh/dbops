@@ -56,6 +56,17 @@ type Config struct {
 		PackageSigningKey    string `yaml:"-"`
 	} `yaml:"security"`
 
+	Auth struct {
+		Enabled                   bool   `yaml:"enabled"`
+		JWTSecretEnv              string `yaml:"jwt_secret_env"`
+		JWTSecret                 string `yaml:"-"`
+		AccessMinutes             int    `yaml:"access_minutes"`
+		RefreshHours              int    `yaml:"refresh_hours"`
+		BootstrapAdminUsername    string `yaml:"bootstrap_admin_username"`
+		BootstrapAdminPasswordEnv string `yaml:"bootstrap_admin_password_env"`
+		BootstrapAdminPassword    string `yaml:"-"`
+	} `yaml:"auth"`
+
 	MySQLInstall struct {
 		AllowProcessMode bool `yaml:"allow_process_mode"`
 	} `yaml:"mysql_install"`
@@ -94,6 +105,12 @@ func Default() Config {
 	c.Alert.EvaluateSeconds = 15
 	c.Security.MasterKeyEnv = "DBOPS_MASTER_KEY"
 	c.Security.PackageSigningKeyEnv = "DBOPS_PACKAGE_SIGNING_KEY"
+	c.Auth.Enabled = true
+	c.Auth.JWTSecretEnv = "DBOPS_JWT_SECRET"
+	c.Auth.AccessMinutes = 15
+	c.Auth.RefreshHours = 168
+	c.Auth.BootstrapAdminUsername = "admin"
+	c.Auth.BootstrapAdminPasswordEnv = "DBOPS_ADMIN_PASSWORD"
 	c.AgentGateway.HeartbeatTimeoutSeconds = 90
 	c.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
 	c.AgentGateway.BootstrapTokenEnv = "DBOPS_AGENT_BOOTSTRAP_TOKEN"
@@ -156,6 +173,29 @@ func Load(path string) (Config, error) {
 	cfg.Security.PackageSigningKey = os.Getenv(cfg.Security.PackageSigningKeyEnv)
 	if cfg.Security.PackageSigningKey == "" {
 		cfg.Security.PackageSigningKey = cfg.Security.MasterKey
+	}
+
+	if cfg.Auth.Enabled {
+		if cfg.Auth.JWTSecretEnv == "" {
+			cfg.Auth.JWTSecretEnv = "DBOPS_JWT_SECRET"
+		}
+		if cfg.Auth.AccessMinutes <= 0 {
+			cfg.Auth.AccessMinutes = 15
+		}
+		if cfg.Auth.RefreshHours <= 0 {
+			cfg.Auth.RefreshHours = 168
+		}
+		if cfg.Auth.BootstrapAdminUsername == "" {
+			cfg.Auth.BootstrapAdminUsername = "admin"
+		}
+		if cfg.Auth.BootstrapAdminPasswordEnv == "" {
+			cfg.Auth.BootstrapAdminPasswordEnv = "DBOPS_ADMIN_PASSWORD"
+		}
+		cfg.Auth.JWTSecret = os.Getenv(cfg.Auth.JWTSecretEnv)
+		if len(cfg.Auth.JWTSecret) < 32 {
+			return cfg, errors.New("JWT secret is required and must be at least 32 characters when auth is enabled")
+		}
+		cfg.Auth.BootstrapAdminPassword = os.Getenv(cfg.Auth.BootstrapAdminPasswordEnv)
 	}
 	return cfg, nil
 }
