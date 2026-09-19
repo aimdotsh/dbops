@@ -125,3 +125,21 @@ type TaskEvent struct {
 	Message     string    `json:"message,omitempty"`
 	PayloadJSON string    `json:"payload_json"`
 }
+
+type MySQLReplication struct {
+	ID                      int64      `json:"id"`
+	PrimaryInstanceID       int64      `json:"primary_instance_id"`
+	ReplicaInstanceID       int64      `json:"replica_instance_id"`
+	ReplicationCredentialID *int64     `json:"replication_credential_id,omitempty"`
+	GTIDEnabled             bool       `json:"gtid_enabled"`
+	IOThreadStatus          string     `json:"io_thread_status,omitempty"`
+	SQLThreadStatus         string     `json:"sql_thread_status,omitempty"`
+	ReplicationLagSeconds   *int64     `json:"replication_lag_seconds,omitempty"`
+	SourceUUID              string     `json:"source_uuid,omitempty"`
+	LastIOError             string     `json:"last_io_error,omitempty"`
+	LastSQLError            string     `json:"last_sql_error,omitempty"`
+	LastCheckedAt           *time.Time `json:"last_checked_at,omitempty"`
+	Status                  string     `json:"status"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
+}
