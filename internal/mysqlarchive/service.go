@@ -30,18 +30,18 @@ type Service struct {
 }
 
 type Request struct {
-	InstanceID           int64  `json:"instance_id"`
-	SourceDatabase       string `json:"source_database"`
-	SourceTable          string `json:"source_table"`
-	DestinationDatabase  string `json:"destination_database,omitempty"`
-	DestinationTable     string `json:"destination_table,omitempty"`
-	Where                string `json:"where"`
-	PTArchiverPath       string `json:"pt_archiver_path"`
-	BatchSize            int    `json:"batch_size"`
-	TxnSize              int    `json:"txn_size"`
-	SleepMS              int    `json:"sleep_ms"`
-	DeleteSource         bool   `json:"delete_source"`
-	Confirmed            bool   `json:"confirmed"`
+	InstanceID          int64  `json:"instance_id"`
+	SourceDatabase      string `json:"source_database"`
+	SourceTable         string `json:"source_table"`
+	DestinationDatabase string `json:"destination_database,omitempty"`
+	DestinationTable    string `json:"destination_table,omitempty"`
+	Where               string `json:"where"`
+	PTArchiverPath      string `json:"pt_archiver_path"`
+	BatchSize           int    `json:"batch_size"`
+	TxnSize             int    `json:"txn_size"`
+	SleepMS             int    `json:"sleep_ms"`
+	DeleteSource        bool   `json:"delete_source"`
+	Confirmed           bool   `json:"confirmed"`
 }
 
 type runtime struct {
@@ -180,7 +180,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 3, StepCode: "ARCHIVE_VERIFY", StepName: "Verify archive result",
 			Status: "success", Progress: 100,
-			OutputJSON: fmt.Sprintf(`{"archive_job_id":%d,"scanned_rows":%d,"archived_rows":%d,"deleted_rows":%d}`, job.ID, scanned, archived, deleted),
+			OutputJSON:     fmt.Sprintf(`{"archive_job_id":%d,"scanned_rows":%d,"archived_rows":%d,"deleted_rows":%d}`, job.ID, scanned, archived, deleted),
 			RecoveryPolicy: "verify_before_retry",
 		})
 		return map[string]any{

@@ -33,17 +33,17 @@ func (s *Server) precheckMySQLArchive(c *gin.Context) {
 		return
 	}
 	out, err := s.mysqlArchive.Precheck(c.Request.Context(), mysqlarchive.Request{
-		InstanceID: id,
-		SourceDatabase: body.SourceDatabase,
-		SourceTable: body.SourceTable,
+		InstanceID:          id,
+		SourceDatabase:      body.SourceDatabase,
+		SourceTable:         body.SourceTable,
 		DestinationDatabase: body.DestinationDatabase,
-		DestinationTable: body.DestinationTable,
-		Where: body.Where,
-		PTArchiverPath: body.PTArchiverPath,
-		BatchSize: body.BatchSize,
-		TxnSize: body.TxnSize,
-		SleepMS: body.SleepMS,
-		DeleteSource: body.DeleteSource,
+		DestinationTable:    body.DestinationTable,
+		Where:               body.Where,
+		PTArchiverPath:      body.PTArchiverPath,
+		BatchSize:           body.BatchSize,
+		TxnSize:             body.TxnSize,
+		SleepMS:             body.SleepMS,
+		DeleteSource:        body.DeleteSource,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_PRECHECK_FAILED", "message": err.Error()})
@@ -63,18 +63,18 @@ func (s *Server) createMySQLArchive(c *gin.Context) {
 		return
 	}
 	task, err := s.mysqlArchive.CreateTask(c.Request.Context(), mysqlarchive.Request{
-		InstanceID: id,
-		SourceDatabase: body.SourceDatabase,
-		SourceTable: body.SourceTable,
+		InstanceID:          id,
+		SourceDatabase:      body.SourceDatabase,
+		SourceTable:         body.SourceTable,
 		DestinationDatabase: body.DestinationDatabase,
-		DestinationTable: body.DestinationTable,
-		Where: body.Where,
-		PTArchiverPath: body.PTArchiverPath,
-		BatchSize: body.BatchSize,
-		TxnSize: body.TxnSize,
-		SleepMS: body.SleepMS,
-		DeleteSource: body.DeleteSource,
-		Confirmed: body.Confirmed,
+		DestinationTable:    body.DestinationTable,
+		Where:               body.Where,
+		PTArchiverPath:      body.PTArchiverPath,
+		BatchSize:           body.BatchSize,
+		TxnSize:             body.TxnSize,
+		SleepMS:             body.SleepMS,
+		DeleteSource:        body.DeleteSource,
+		Confirmed:           body.Confirmed,
 	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_REJECTED", "message": err.Error()})

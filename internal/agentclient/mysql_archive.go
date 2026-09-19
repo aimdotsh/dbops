@@ -49,13 +49,13 @@ func mysqlArchivePrecheck(ctx context.Context, workDir string, params map[string
 	}
 
 	return map[string]any{
-		"ok":              true,
-		"primary_key":     true,
-		"source_database": sourceDB,
-		"source_table":    sourceTable,
+		"ok":                   true,
+		"primary_key":          true,
+		"source_database":      sourceDB,
+		"source_table":         sourceTable,
 		"destination_database": destDB,
-		"destination_table": destTable,
-		"dry_run_output":  trimOutput(out.String(), 8192),
+		"destination_table":    destTable,
+		"dry_run_output":       trimOutput(out.String(), 8192),
 	}, nil
 }
 
@@ -109,14 +109,14 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	}
 	scanned, archived, deleted := parseArchiveStats(out.String(), deleteSource)
 	return map[string]any{
-		"status":          "completed",
-		"scanned_rows":    scanned,
-		"archived_rows":   archived,
-		"deleted_rows":    deleted,
-		"failed_rows":     int64(0),
-		"delete_source":   deleteSource,
-		"statistics":      trimOutput(out.String(), 16384),
-		"verification":    "command_completed",
+		"status":        "completed",
+		"scanned_rows":  scanned,
+		"archived_rows": archived,
+		"deleted_rows":  deleted,
+		"failed_rows":   int64(0),
+		"delete_source": deleteSource,
+		"statistics":    trimOutput(out.String(), 16384),
+		"verification":  "command_completed",
 	}, nil
 }
 
@@ -130,7 +130,7 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 
 	for name, value := range map[string]string{
 		"source_database": sourceDB,
-		"source_table": sourceTable,
+		"source_table":    sourceTable,
 	} {
 		if !validSQLIdentifier(value) {
 			return "", "", "", "", "", "", fmt.Errorf("invalid %s", name)
