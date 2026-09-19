@@ -12,6 +12,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/httpapi"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
+	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
 	"github.com/aimdotsh/dbops/internal/security"
@@ -117,6 +118,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		gateway,
 	)
 
+	mysqlService := mysqlservice.New(agentRepo, dbRepo, taskRepo, gateway)
+
 	taskEngine := task.New(
 		taskRepo,
 		logger,
@@ -130,6 +133,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
+	taskEngine.Register("mysql.service", mysqlService.Handler())
 
 	return &App{
 		cfg:    cfg,
@@ -144,6 +148,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			softwareService,
 			mysqlInstaller,
 			mysqlReplication,
+			mysqlService,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
