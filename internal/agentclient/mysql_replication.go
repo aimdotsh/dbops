@@ -93,13 +93,12 @@ func mysqlReplicationStatus(ctx context.Context, params map[string]any) (map[str
 	if err != nil {
 		return nil, err
 	}
-	out, err := runMySQLQuery(ctx, baseDir, runDir, password, "SHOW REPLICA STATUS\G", false)
+	out, err := runMySQLQuery(ctx, baseDir, runDir, password, "SHOW REPLICA STATUS\\G", false)
 	if err != nil {
 		return nil, err
 	}
 	values := map[string]string{}
-	for _, line := range strings.Split(out, "
-") {
+	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !strings.Contains(line, ":") {
 			continue
