@@ -56,6 +56,10 @@ type Config struct {
 		PackageSigningKey     string `yaml:"-"`
 	} `yaml:"security"`
 
+	MySQLInstall struct {
+		AllowProcessMode bool `yaml:"allow_process_mode"`
+	} `yaml:"mysql_install"`
+
 	AgentGateway struct {
 		HeartbeatTimeoutSeconds   int    `yaml:"heartbeat_timeout_seconds"`
 		WebsocketPath             string `yaml:"websocket_path"`
