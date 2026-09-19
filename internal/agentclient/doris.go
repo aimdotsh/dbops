@@ -29,15 +29,15 @@ func dorisClusterStatus(ctx context.Context, workDir string, params map[string]a
 	loadJobs, _ := runDorisTable(ctx, workDir, params, "SHOW LOAD")
 
 	return map[string]any{
-		"version": strings.TrimSpace(version),
-		"frontends": frontends,
-		"backends": backends,
+		"version":       strings.TrimSpace(version),
+		"frontends":     frontends,
+		"backends":      backends,
 		"tablet_health": tabletHealth,
-		"load_jobs": loadJobs,
-		"fe_total": len(frontends),
-		"fe_alive": countAlive(frontends),
-		"be_total": len(backends),
-		"be_alive": countAlive(backends),
+		"load_jobs":     loadJobs,
+		"fe_total":      len(frontends),
+		"fe_alive":      countAlive(frontends),
+		"be_total":      len(backends),
+		"be_alive":      countAlive(backends),
 	}, nil
 }
 
@@ -95,13 +95,13 @@ func dorisBackup(ctx context.Context, workDir string, params map[string]any) (ma
 			switch strings.ToUpper(state) {
 			case "FINISHED":
 				return map[string]any{
-					"engine": "doris_snapshot",
-					"backup_type": "snapshot",
-					"database": database,
-					"repository": repository,
-					"label": label,
-					"state": "FINISHED",
-					"job": last[0],
+					"engine":       "doris_snapshot",
+					"backup_type":  "snapshot",
+					"database":     database,
+					"repository":   repository,
+					"label":        label,
+					"state":        "FINISHED",
+					"job":          last[0],
 					"completed_at": time.Now().UTC().Format(time.RFC3339),
 				}, nil
 			case "CANCELLED":
