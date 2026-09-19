@@ -18,6 +18,7 @@ type AgentRepository interface {
 	MarkOffline(context.Context, string) error
 	Get(context.Context, int64) (domain.Agent, error)
 	GetByUUID(context.Context, string) (domain.Agent, error)
+	GetByHostID(context.Context, int64) (domain.Agent, error)
 	List(context.Context) ([]domain.Agent, error)
 	BindHostByIdentity(context.Context, string, string, string) (*int64, error)
 	GetCredentialHash(context.Context, string) (string, error)
@@ -46,6 +47,13 @@ type ServerIDRepository interface {
 	Reserve(context.Context, int64, int64, int) (domain.ServerIDReservation, error)
 	BindInstance(context.Context, int64, int64) error
 	MarkFailed(context.Context, int64) error
+}
+
+type MySQLReplicationRepository interface {
+	Create(context.Context, domain.MySQLReplication) (domain.MySQLReplication, error)
+	Get(context.Context, int64) (domain.MySQLReplication, error)
+	List(context.Context) ([]domain.MySQLReplication, error)
+	UpdateStatus(context.Context, int64, domain.MySQLReplication) error
 }
 
 type TaskRepository interface {
