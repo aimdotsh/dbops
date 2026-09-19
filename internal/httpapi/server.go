@@ -18,6 +18,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	oraclesvc "github.com/aimdotsh/dbops/internal/oracle"
+	pgsvc "github.com/aimdotsh/dbops/internal/postgres"
 	"github.com/aimdotsh/dbops/internal/repository"
 	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/gin-gonic/gin"
@@ -39,6 +40,7 @@ type Server struct {
 	mysqlReplication *mysqlreplication.Service
 	mysqlService     *mysqlservice.Service
 	oracle           *oraclesvc.Service
+	postgres         *pgsvc.Service
 }
 
 func New(
@@ -57,6 +59,7 @@ func New(
 	mysqlReplication *mysqlreplication.Service,
 	mysqlService *mysqlservice.Service,
 	oracleService *oraclesvc.Service,
+	postgresService *pgsvc.Service,
 	agentWS http.Handler,
 	websocketPath string,
 ) *Server {
@@ -68,7 +71,7 @@ func New(
 		auth: authService, hosts: hosts, agents: agents, dbs: dbs, tasks: tasks,
 		metrics: metricsStore, alerts: alertEngine, software: softwareService,
 		mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive,
-		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService,
+		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService, postgres: postgresService,
 	}
 
 	v1 := r.Group("/api/v1")
@@ -135,6 +138,12 @@ func New(
 	protected.POST("/oracle/instances/:id/datafiles", adminDBA, s.addOracleDatafile)
 	protected.POST("/oracle/instances/:id/datafiles/resize", adminDBA, s.resizeOracleDatafile)
 	protected.POST("/oracle/instances/:id/backups/rman", ops, s.createOracleRMANBackup)
+
+	protected.POST("/postgres/instances", adminDBA, s.onboardPostgres)
+	protected.GET("/postgres/instances/:id/status", read, s.postgresStatus)
+	protected.GET("/postgres/instances/:id/replication", read, s.postgresReplicationStatus)
+	protected.GET("/postgres/backups", read, s.listPostgresBackups)
+	protected.POST("/postgres/instances/:id/backups", ops, s.createPostgresBackup)
 
 	protected.GET("/tasks", read, s.listTasks)
 	protected.POST("/tasks", superAdmin, s.createTask)
