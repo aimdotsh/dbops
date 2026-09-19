@@ -216,3 +216,20 @@ CREATE TABLE IF NOT EXISTS archive_jobs (
   error_message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_archive_jobs_source_status ON archive_jobs(source_instance_id,status);
+
+
+CREATE TABLE IF NOT EXISTS alert_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  resource_type TEXT NOT NULL,
+  resource_id INTEGER NOT NULL,
+  fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  message TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  last_seen_at TEXT,
+  resolved_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_alert_events_status_severity ON alert_events(status,severity,started_at);
+CREATE INDEX IF NOT EXISTS idx_alert_events_fingerprint ON alert_events(fingerprint,status);
