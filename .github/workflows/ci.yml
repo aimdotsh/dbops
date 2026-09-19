@@ -187,10 +187,45 @@ jobs:
           '''
 
           pt_archiver = r'''#!/usr/bin/env python3
-          import sys
-          if "--dry-run" in sys.argv:
+          import os, sys, time
+
+          args = sys.argv[1:]
+          if "--dry-run" in args:
               print("pt-archiver dry-run OK")
               sys.exit(0)
+
+          def arg(name, default=""):
+              if name not in args:
+                  return default
+              i = args.index(name)
+              return args[i + 1] if i + 1 < len(args) else default
+
+          where = arg("--where")
+          sentinel = arg("--sentinel")
+          marker = sentinel + ".paused-once" if sentinel else ""
+
+          if "999999" in where and marker and not os.path.exists(marker):
+              for _ in range(150):
+                  if os.path.exists(sentinel):
+                      mode = open(sentinel).read().strip()
+                      if mode == "pause":
+                          open(marker, "w").write("1")
+                          print("DBOPS_ROWS scanned=25 archived=25 deleted=0")
+                          print("pt-archiver paused at sentinel")
+                          sys.exit(0)
+                      if mode == "stop":
+                          print("DBOPS_ROWS scanned=10 archived=10 deleted=0")
+                          print("pt-archiver stopped at sentinel")
+                          sys.exit(0)
+                  time.sleep(0.1)
+              print("DBOPS_ROWS scanned=50 archived=50 deleted=0")
+              sys.exit(0)
+
+          if "999999" in where:
+              print("DBOPS_ROWS scanned=75 archived=75 deleted=0")
+              print("pt-archiver resumed and completed")
+              sys.exit(0)
+
           print("DBOPS_ROWS scanned=100 archived=100 deleted=0")
           print("pt-archiver statistics: 100 rows")
           sys.exit(0)
