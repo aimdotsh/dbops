@@ -4,9 +4,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/aimdotsh/dbops/internal/agentgateway"
 	"github.com/aimdotsh/dbops/internal/alert"
+	authsvc "github.com/aimdotsh/dbops/internal/auth"
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/httpapi"
@@ -68,6 +70,24 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	cipher, err := security.NewCipher(cfg.Security.MasterKey)
 	if err != nil {
+		stores.Close()
+		return nil, err
+	}
+
+	authRepo := reposqlite.AuthRepo{DB: stores.Metadata}
+	authService, err := authsvc.New(authRepo, authsvc.Config{
+		Enabled: cfg.Auth.Enabled,
+		JWTSecret: cfg.Auth.JWTSecret,
+		AccessTTL: time.Duration(cfg.Auth.AccessMinutes) * time.Minute,
+		RefreshTTL: time.Duration(cfg.Auth.RefreshHours) * time.Hour,
+		BootstrapAdminUsername: cfg.Auth.BootstrapAdminUsername,
+		BootstrapAdminPassword: cfg.Auth.BootstrapAdminPassword,
+	})
+	if err != nil {
+		stores.Close()
+		return nil, err
+	}
+	if err := authService.Bootstrap(context.Background()); err != nil {
 		stores.Close()
 		return nil, err
 	}
@@ -156,6 +176,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		stores: stores,
 		http: httpapi.New(
 			cfg.Server.Listen,
+			authService,
 			hostRepo,
 			agentRepo,
 			dbRepo,
