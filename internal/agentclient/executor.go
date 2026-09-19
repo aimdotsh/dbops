@@ -127,6 +127,12 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return oracleDatafileResize(ctx, e.workDir, req.Params)
 	case "oracle.rman.backup":
 		return oracleRMANBackup(ctx, e.workDir, req.Params)
+	case "postgres.status":
+		return postgresStatus(ctx, e.workDir, req.Params)
+	case "postgres.replication.status":
+		return postgresReplicationStatus(ctx, e.workDir, req.Params)
+	case "postgres.backup":
+		return postgresBackup(ctx, e.workDir, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
