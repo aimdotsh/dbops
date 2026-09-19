@@ -26,6 +26,26 @@ type AgentRepository interface {
 
 type DatabaseRepository interface {
 	List(context.Context) ([]domain.DatabaseInstance, error)
+	Get(context.Context, int64) (domain.DatabaseInstance, error)
+	CreateInstalled(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
+}
+
+type SoftwarePackageRepository interface {
+	Create(context.Context, domain.SoftwarePackage) (domain.SoftwarePackage, error)
+	Get(context.Context, int64) (domain.SoftwarePackage, error)
+	List(context.Context) ([]domain.SoftwarePackage, error)
+}
+
+type CredentialRepository interface {
+	Create(context.Context, domain.Credential) (domain.Credential, error)
+	Get(context.Context, int64) (domain.Credential, error)
+	Delete(context.Context, int64) error
+}
+
+type ServerIDRepository interface {
+	Reserve(context.Context, int64, int64, int) (domain.ServerIDReservation, error)
+	BindInstance(context.Context, int64, int64) error
+	MarkFailed(context.Context, int64) error
 }
 
 type TaskRepository interface {
