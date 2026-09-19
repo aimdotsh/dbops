@@ -354,7 +354,7 @@ func (g *Gateway) recordResponse(ctx context.Context, resp agentproto.ActionResp
 		}
 		_ = g.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID:         resp.TaskID,
-			StepNo:         1,
+			StepNo:         stepNumber(resp.Step),
 			StepCode:       resp.Step.Code,
 			StepName:       resp.Step.Name,
 			Status:         status,
@@ -445,4 +445,11 @@ func (c *client) close() {
 	c.closeOnce.Do(func() {
 		close(c.done)
 	})
+}
+
+func stepNumber(step agentproto.Step) int {
+	if step.No > 0 {
+		return step.No
+	}
+	return 1
 }
