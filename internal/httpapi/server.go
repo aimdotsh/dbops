@@ -163,6 +163,7 @@ func New(
 		websocketPath = "/api/v1/agent/ws"
 	}
 	r.GET(websocketPath, gin.WrapH(agentWS))
+	registerWeb(r)
 
 	s.http = &http.Server{
 		Addr:              addr,
