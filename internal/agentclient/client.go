@@ -292,7 +292,6 @@ func primaryIP() string {
 	return ""
 }
 
-
 func isControlAction(action string) bool {
 	switch action {
 	case "mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop":

@@ -55,7 +55,6 @@ func TestSafeArchiveWhere(t *testing.T) {
 	}
 }
 
-
 func TestArchiveControlsUseReservedLane(t *testing.T) {
 	for _, action := range []string{"mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop"} {
 		if !isControlAction(action) {
