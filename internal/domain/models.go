@@ -24,15 +24,58 @@ type Agent struct {
 }
 
 type DatabaseInstance struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	DBType      string `json:"db_type"`
-	Version     string `json:"version,omitempty"`
-	HostID      int64  `json:"host_id"`
-	Port        int    `json:"port"`
-	Role        string `json:"role,omitempty"`
-	Status      string `json:"status"`
-	ManagedMode string `json:"managed_mode"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	DBType       string `json:"db_type"`
+	Version      string `json:"version,omitempty"`
+	HostID       int64  `json:"host_id"`
+	Port         int    `json:"port"`
+	Role         string `json:"role,omitempty"`
+	DataDir      string `json:"data_dir,omitempty"`
+	ConfigPath   string `json:"config_path,omitempty"`
+	CredentialID *int64 `json:"credential_id,omitempty"`
+	Status       string `json:"status"`
+	ManagedMode  string `json:"managed_mode"`
+	MetadataJSON string `json:"metadata_json,omitempty"`
+}
+
+type SoftwarePackage struct {
+	ID                int64     `json:"id"`
+	SoftwareName      string    `json:"software_name"`
+	Version           string    `json:"version"`
+	OSFamily          string    `json:"os_family,omitempty"`
+	Architecture      string    `json:"architecture,omitempty"`
+	PackageType       string    `json:"package_type,omitempty"`
+	FileName          string    `json:"file_name"`
+	StoragePath       string    `json:"-"`
+	DownloadURL       string    `json:"download_url,omitempty"`
+	SHA256            string    `json:"sha256"`
+	SizeBytes         int64     `json:"size_bytes"`
+	CompatibilityJSON string    `json:"compatibility_json,omitempty"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type Credential struct {
+	ID              int64     `json:"id"`
+	Name            string    `json:"name"`
+	CredentialType  string    `json:"credential_type"`
+	Username        string    `json:"username,omitempty"`
+	EncryptedSecret string    `json:"-"`
+	MetadataJSON    string    `json:"metadata_json,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type ServerIDReservation struct {
+	ID         int64     `json:"id"`
+	ServerID   int       `json:"server_id"`
+	HostID     int64     `json:"host_id"`
+	Port       int       `json:"port"`
+	TaskID     int64     `json:"task_id"`
+	InstanceID *int64    `json:"instance_id,omitempty"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Task struct {
