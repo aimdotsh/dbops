@@ -54,3 +54,15 @@ func TestSafeArchiveWhere(t *testing.T) {
 		t.Fatal("expected controlled where to be accepted")
 	}
 }
+
+
+func TestArchiveControlsUseReservedLane(t *testing.T) {
+	for _, action := range []string{"mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop"} {
+		if !isControlAction(action) {
+			t.Fatalf("%s should use reserved control lane", action)
+		}
+	}
+	if isControlAction("mysql.archive.start") {
+		t.Fatal("archive start must remain subject to normal concurrency limits")
+	}
+}
