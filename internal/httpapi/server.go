@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
@@ -27,6 +28,7 @@ type Server struct {
 	software         *software.Service
 	mysqlInstaller   *mysqlinstall.Service
 	mysqlBackup      *mysqlbackup.Service
+	mysqlArchive     *mysqlarchive.Service
 	mysqlReplication *mysqlreplication.Service
 	mysqlService     *mysqlservice.Service
 }
@@ -40,6 +42,7 @@ func New(
 	softwareService *software.Service,
 	mysqlInstaller *mysqlinstall.Service,
 	mysqlBackup *mysqlbackup.Service,
+	mysqlArchive *mysqlarchive.Service,
 	mysqlReplication *mysqlreplication.Service,
 	mysqlService *mysqlservice.Service,
 	agentWS http.Handler,
@@ -49,7 +52,7 @@ func New(
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
+	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/health", s.health)
@@ -65,6 +68,9 @@ func New(
 	v1.POST("/mysql/install", s.createMySQLInstall)
 	v1.GET("/mysql/backups", s.listMySQLBackups)
 	v1.POST("/mysql/instances/:id/backups", s.createMySQLBackup)
+	v1.GET("/mysql/archive/jobs", s.listMySQLArchiveJobs)
+	v1.POST("/mysql/instances/:id/archive/precheck", s.precheckMySQLArchive)
+	v1.POST("/mysql/instances/:id/archive", s.createMySQLArchive)
 	v1.GET("/mysql/replications", s.listMySQLReplications)
 	v1.POST("/mysql/replications", s.createMySQLReplication)
 	v1.POST("/mysql/replications/:id/refresh", s.refreshMySQLReplication)
