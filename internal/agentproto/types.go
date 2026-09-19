@@ -2,11 +2,16 @@ package agentproto
 
 import "encoding/json"
 
-const ProtocolVersion = "1.0"
+const ProtocolVersion = "1.1"
 
 type Envelope struct {
 	Type string          `json:"type"`
 	Data json.RawMessage `json:"data"`
+}
+
+type Auth struct {
+	BootstrapToken string `json:"bootstrap_token,omitempty"`
+	Credential     string `json:"credential,omitempty"`
 }
 
 type Hello struct {
@@ -16,6 +21,13 @@ type Hello struct {
 	IPAddress       string `json:"ip_address,omitempty"`
 	Architecture    string `json:"architecture,omitempty"`
 	ProtocolVersion string `json:"protocol_version"`
+	Auth            Auth   `json:"auth"`
+}
+
+type Registration struct {
+	AgentID    int64  `json:"agent_id"`
+	AgentUUID  string `json:"agent_uuid"`
+	Credential string `json:"credential,omitempty"`
 }
 
 type Heartbeat struct {
@@ -28,6 +40,8 @@ type ActionRequest struct {
 	RequestID       string         `json:"request_id"`
 	TaskID          int64          `json:"task_id"`
 	Action          string         `json:"action"`
+	Risk            string         `json:"risk,omitempty"`
+	Confirmed       bool           `json:"confirmed,omitempty"`
 	ProtocolVersion string         `json:"protocol_version"`
 	TimeoutSeconds  int            `json:"timeout_seconds"`
 	Params          map[string]any `json:"params,omitempty"`
