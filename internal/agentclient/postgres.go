@@ -144,7 +144,7 @@ func postgresBackup(ctx context.Context, workDir string, params map[string]any) 
 		return nil, fmt.Errorf("pg_dump failed: %w: %s", err, trimOutput(out.String(), 16384))
 	}
 
-	sum, size, err := fileSHA256(outputPath)
+	sum, size, err := fileSHA256WithSize(outputPath)
 	if err != nil {
 		return nil, err
 	}
