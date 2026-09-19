@@ -204,6 +204,8 @@ jobs:
           security:
             master_key_env: DBOPS_MASTER_KEY
             package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          auth:
+            enabled: false
           mysql_install:
             allow_process_mode: true
           agent_gateway:
