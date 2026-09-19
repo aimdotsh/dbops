@@ -49,8 +49,11 @@ type Config struct {
 	} `yaml:"alert"`
 
 	AgentGateway struct {
-		HeartbeatTimeoutSeconds int    `yaml:"heartbeat_timeout_seconds"`
-		WebsocketPath           string `yaml:"websocket_path"`
+		HeartbeatTimeoutSeconds     int    `yaml:"heartbeat_timeout_seconds"`
+		WebsocketPath               string `yaml:"websocket_path"`
+		BootstrapTokenEnv           string `yaml:"bootstrap_token_env"`
+		AllowInsecureRegistration   bool   `yaml:"allow_insecure_registration"`
+		BootstrapToken              string `yaml:"-"`
 	} `yaml:"agent_gateway"`
 }
 
@@ -78,6 +81,7 @@ func Default() Config {
 	c.Alert.EvaluateSeconds = 15
 	c.AgentGateway.HeartbeatTimeoutSeconds = 90
 	c.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
+	c.AgentGateway.BootstrapTokenEnv = "DBOPS_AGENT_BOOTSTRAP_TOKEN"
 	return c
 }
 
@@ -109,6 +113,13 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.AgentGateway.WebsocketPath == "" {
 		cfg.AgentGateway.WebsocketPath = "/api/v1/agent/ws"
+	}
+	if cfg.AgentGateway.BootstrapTokenEnv == "" {
+		cfg.AgentGateway.BootstrapTokenEnv = "DBOPS_AGENT_BOOTSTRAP_TOKEN"
+	}
+	cfg.AgentGateway.BootstrapToken = os.Getenv(cfg.AgentGateway.BootstrapTokenEnv)
+	if cfg.AgentGateway.BootstrapToken == "" && !cfg.AgentGateway.AllowInsecureRegistration {
+		return cfg, errors.New("agent bootstrap token is required; set the configured bootstrap token environment variable")
 	}
 	return cfg, nil
 }
