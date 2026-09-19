@@ -199,7 +199,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		})
 		if err != nil { return nil, err }
 		_, _ = step(6,"REGISTER_TOPOLOGY","Register topology",90,func()(any,error){return rec,nil})
-		_, _ = step(7,"ENABLE_REPLICATION_ALERTS","Enable replication alerts",95,func()(any,error){return map[string]any{"enabled":true,"defaults":["thread_down","lag"]},nil})
+		_, _ = step(7,"ENABLE_REPLICATION_ALERTS","Enable replication alerts",95,func()(any,error){return map[string]any{"enabled":true,"defaults":[]string{"thread_down","lag"}},nil})
 		_, _ = step(8,"FINAL_VERIFY","Final verify",100,func()(any,error){return s.dispatchStatus(ctx,t.ID,replica)})
 
 		return map[string]any{"replication_id":rec.ID,"primary_instance_id":rec.PrimaryInstanceID,"replica_instance_id":rec.ReplicaInstanceID,"status":"healthy"},nil
@@ -228,7 +228,12 @@ func (s *Service) loadRuntime(ctx context.Context, id int64) (runtime, error) {
 	host,err:=s.hosts.Get(ctx,inst.HostID);if err!=nil{return runtime{},err}
 	cred,err:=s.credentials.Get(ctx,*inst.CredentialID);if err!=nil{return runtime{},err}
 	password,err:=s.cipher.DecryptString(cred.EncryptedSecret);if err!=nil{return runtime{},err}
-	var meta struct{InstallResult struct{BaseDir string `json:"base_dir"`; RunDir string `json:"run_dir"`} `json:"install_result"`}
+	var meta struct {
+		InstallResult struct {
+			BaseDir string `json:"base_dir"`
+			RunDir  string `json:"run_dir"`
+		} `json:"install_result"`
+	}
 	if err:=json.Unmarshal([]byte(inst.MetadataJSON),&meta);err!=nil{return runtime{},err}
 	if meta.InstallResult.BaseDir==""||meta.InstallResult.RunDir==""{return runtime{},errors.New("instance runtime metadata is incomplete")}
 	return runtime{Instance:inst,Agent:agent,Host:host,BaseDir:meta.InstallResult.BaseDir,RunDir:meta.InstallResult.RunDir,Password:password},nil
