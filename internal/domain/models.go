@@ -178,3 +178,47 @@ type ArchiveJob struct {
 	VerificationStatus  string     `json:"verification_status,omitempty"`
 	ErrorMessage        string     `json:"error_message,omitempty"`
 }
+
+
+type ArchivePolicy struct {
+	ID                    int64     `json:"id"`
+	Name                  string    `json:"name"`
+	SourceInstanceID      int64     `json:"source_instance_id"`
+	SourceDatabase        string    `json:"source_database"`
+	SourceTable           string    `json:"source_table"`
+	ArchiveColumn         string    `json:"archive_column,omitempty"`
+	WhereTemplate         string    `json:"where_template"`
+	RetentionDays         int       `json:"retention_days,omitempty"`
+	DestinationType       string    `json:"destination_type"`
+	DestinationInstanceID *int64    `json:"destination_instance_id,omitempty"`
+	DestinationDatabase   string    `json:"destination_database,omitempty"`
+	DestinationTable      string    `json:"destination_table,omitempty"`
+	BatchSize             int       `json:"batch_size"`
+	TxnSize               int       `json:"txn_size,omitempty"`
+	SleepMS               int       `json:"sleep_ms"`
+	MaxReplicationLag     int       `json:"max_replication_lag"`
+	MaxThreadsRunning     int       `json:"max_threads_running,omitempty"`
+	DeleteSource          bool      `json:"delete_source"`
+	Enabled               bool      `json:"enabled"`
+	OptionsJSON           string    `json:"options_json,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+type ArchiveJob struct {
+	ID               int64      `json:"id"`
+	TaskID           *int64     `json:"task_id,omitempty"`
+	PolicyID         int64      `json:"policy_id"`
+	Status           string     `json:"status"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	ScannedRows      int64      `json:"scanned_rows"`
+	ArchivedRows     int64      `json:"archived_rows"`
+	DeletedRows      int64      `json:"deleted_rows"`
+	FailedRows       int64      `json:"failed_rows"`
+	SpeedRowsSec     int64      `json:"speed_rows_sec,omitempty"`
+	LastProcessedKey string     `json:"last_processed_key,omitempty"`
+	PauseReason      string     `json:"pause_reason,omitempty"`
+	VerificationStatus string   `json:"verification_status,omitempty"`
+	ErrorMessage     string     `json:"error_message,omitempty"`
+}
