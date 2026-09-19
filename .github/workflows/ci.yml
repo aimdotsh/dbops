@@ -29,10 +29,15 @@ jobs:
           go build -o /tmp/dbops-server ./cmd/dbops-server
           go build -o /tmp/dbops-agent ./cmd/dbops-agent
 
-      - name: Agent gateway integration test
+      - name: Secure agent and MySQL precheck integration test
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf /tmp/dbops-ci /tmp/dbops-agent-ci /tmp/dbops-mysql-precheck
+          mkdir -p /tmp/dbops-agent-ci /tmp/dbops-mysql-precheck
+          printf '%s\n' 'ci-bootstrap-token' >/tmp/dbops-agent-ci/bootstrap.token
+          chmod 600 /tmp/dbops-agent-ci/bootstrap.token
+
           cat >/tmp/dbops-server.yaml <<'EOF'
           server:
             listen: 127.0.0.1:18080
@@ -59,6 +64,8 @@ jobs:
           agent_gateway:
             heartbeat_timeout_seconds: 10
             websocket_path: /api/v1/agent/ws
+            bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+            allow_insecure_registration: false
           EOF
 
           cat >/tmp/dbops-agent.yaml <<'EOF'
@@ -70,26 +77,30 @@ jobs:
             work_dir: /tmp/dbops-agent-ci
             log_dir: /tmp/dbops-agent-ci/logs
           security:
+            bootstrap_token_file: /tmp/dbops-agent-ci/bootstrap.token
+            credential_file: /tmp/dbops-agent-ci/agent.credential
             verify_server_tls: true
           executor:
             max_concurrent_tasks: 1
             allowed_actions_file: agent/agent-actions.yaml
           EOF
 
-          /tmp/dbops-server --config /tmp/dbops-server.yaml >/tmp/dbops-server.log 2>&1 &
+          DBOPS_AGENT_BOOTSTRAP_TOKEN=ci-bootstrap-token /tmp/dbops-server --config /tmp/dbops-server.yaml >/tmp/dbops-server.log 2>&1 &
           SERVER_PID=$!
-          trap 'kill $SERVER_PID $AGENT_PID 2>/dev/null || true; cat /tmp/dbops-server.log; cat /tmp/dbops-agent.log 2>/dev/null || true' EXIT
+          AGENT_PID=""
+          trap 'kill "$SERVER_PID" ${AGENT_PID:-} 2>/dev/null || true; echo "--- server log ---"; cat /tmp/dbops-server.log 2>/dev/null || true; echo "--- agent log ---"; cat /tmp/dbops-agent.log 2>/dev/null || true' EXIT
 
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null; then break; fi
             sleep 1
           done
+          curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null
 
           /tmp/dbops-agent --config /tmp/dbops-agent.yaml >/tmp/dbops-agent.log 2>&1 &
           AGENT_PID=$!
 
           python3 - <<'PY'
-          import json, time, urllib.request
+          import json, os, stat, time, urllib.request
 
           base = "http://127.0.0.1:18080/api/v1"
 
@@ -97,53 +108,117 @@ jobs:
               with urllib.request.urlopen(base + path, timeout=3) as r:
                   return json.load(r)["data"]
 
+          def create_task(agent_id, action, params=None, confirmed=False):
+              body = {
+                  "task_type": "agent.action",
+                  "agent_id": agent_id,
+                  "parameters_json": json.dumps({
+                      "action": action,
+                      "confirmed": confirmed,
+                      "timeout_seconds": 15,
+                      "params": params or {},
+                  }),
+              }
+              req = urllib.request.Request(
+                  base + "/tasks",
+                  data=json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=3) as r:
+                  return json.load(r)["data"]["id"]
+
+          def wait_task(task_id):
+              task = None
+              for _ in range(40):
+                  task = get(f"/tasks/{task_id}")
+                  if task["status"] in ("success", "failed", "timeout", "cancelled"):
+                      return task
+                  time.sleep(0.5)
+              raise SystemExit(f"task timeout: {task}")
+
           agent_id = None
           for _ in range(30):
               try:
                   agents = get("/agents")
-                  if agents:
+                  if agents and agents[0]["status"] == "online":
                       agent_id = agents[0]["id"]
                       break
               except Exception:
                   pass
               time.sleep(1)
           if not agent_id:
-              raise SystemExit("agent did not register")
+              raise SystemExit("agent did not securely register")
 
-          payload = {
-              "task_type": "agent.action",
-              "agent_id": agent_id,
-              "parameters_json": json.dumps({
-                  "action": "host.info",
-                  "timeout_seconds": 10,
-                  "params": {}
-              })
-          }
-          req = urllib.request.Request(
-              base + "/tasks",
-              data=json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          with urllib.request.urlopen(req, timeout=3) as r:
-              task_id = json.load(r)["data"]["id"]
-
-          task = None
-          for _ in range(30):
-              task = get(f"/tasks/{task_id}")
-              if task["status"] in ("success", "failed", "timeout", "cancelled"):
+          credential = "/tmp/dbops-agent-ci/agent.credential"
+          for _ in range(20):
+              if os.path.exists(credential):
                   break
-              time.sleep(1)
+              time.sleep(0.25)
+          if not os.path.exists(credential):
+              raise SystemExit("persistent agent credential was not created")
+          if stat.S_IMODE(os.stat(credential).st_mode) != 0o600:
+              raise SystemExit("agent credential permissions are not 0600")
 
-          if not task or task["status"] != "success":
-              raise SystemExit(f"task did not succeed: {task}")
-
-          steps = get(f"/tasks/{task_id}/steps")
+          secret = "DO_NOT_LEAK_123"
+          task_id = create_task(agent_id, "host.info", {"password": secret})
+          task = wait_task(task_id)
+          if task["status"] != "success":
+              raise SystemExit(f"host.info failed: {task}")
           events = get(f"/tasks/{task_id}/events")
-          if not steps or steps[-1]["status"] != "success":
-              raise SystemExit(f"step verification failed: {steps}")
-          if len(events) < 2:
-              raise SystemExit(f"expected task events, got: {events}")
+          rendered = json.dumps(events)
+          if secret in rendered or "***REDACTED***" not in rendered:
+              raise SystemExit(f"secret redaction failed: {events}")
 
-          print("agent gateway integration OK", {"agent_id": agent_id, "task_id": task_id})
+          precheck_id = create_task(agent_id, "mysql.precheck", {
+              "port": 13306,
+              "data_dir": "/tmp/dbops-mysql-precheck",
+              "min_free_bytes": 1,
+              "min_memory_bytes": 1,
+              "min_cpu_cores": 1,
+              "expected_os": "linux",
+              "expected_arch": "amd64",
+              "service_name": "dbops-mysql-13306",
+          })
+          precheck = wait_task(precheck_id)
+          if precheck["status"] != "success":
+              raise SystemExit(f"mysql.precheck task failed: {precheck}")
+          result = json.loads(precheck["result_json"])
+          if result.get("ok") is not True:
+              raise SystemExit(f"mysql.precheck blocked unexpectedly: {result}")
+
+          high_id = create_task(agent_id, "mysql.stop", {})
+          high = wait_task(high_id)
+          if high["status"] != "failed" or "requires explicit confirmation" not in (high.get("error_message") or ""):
+              raise SystemExit(f"R3 confirmation guard failed: {high}")
+
+          print("secure enrollment, redaction, R3 guard and mysql.precheck OK", {
+              "agent_id": agent_id,
+              "host_task": task_id,
+              "precheck_task": precheck_id,
+              "guard_task": high_id,
+          })
+          PY
+
+          kill "$AGENT_PID"
+          wait "$AGENT_PID" || true
+          rm -f /tmp/dbops-agent-ci/bootstrap.token
+          /tmp/dbops-agent --config /tmp/dbops-agent.yaml >>/tmp/dbops-agent.log 2>&1 &
+          AGENT_PID=$!
+
+          python3 - <<'PY'
+          import json, time, urllib.request
+          url = "http://127.0.0.1:18080/api/v1/agents"
+          for _ in range(30):
+              try:
+                  with urllib.request.urlopen(url, timeout=3) as r:
+                      agents = json.load(r)["data"]
+                  if agents and agents[0]["status"] == "online":
+                      print("persistent credential reconnect OK")
+                      break
+              except Exception:
+                  pass
+              time.sleep(1)
+          else:
+              raise SystemExit("agent did not reconnect using persistent credential")
           PY
