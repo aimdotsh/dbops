@@ -152,7 +152,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlService := mysqlservice.New(agentRepo, dbRepo, taskRepo, gateway)
-	oracleService := oraclesvc.New(agentRepo, dbRepo, credentialRepo, taskRepo, cipher, gateway)
+	oracleService := oraclesvc.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
 
 	taskEngine := task.New(
 		taskRepo,
@@ -173,6 +173,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("mysql.service", mysqlService.Handler())
 	taskEngine.Register("oracle.datafile.add", oracleService.AddHandler())
 	taskEngine.Register("oracle.datafile.resize", oracleService.ResizeHandler())
+	taskEngine.Register("oracle.rman.backup", oracleService.RMANBackupHandler())
 
 	return &App{
 		cfg:    cfg,
