@@ -57,6 +57,20 @@ type MySQLReplicationRepository interface {
 	UpdateStatus(context.Context, int64, domain.MySQLReplication) error
 }
 
+type ArchivePolicyRepository interface {
+	Create(context.Context, domain.ArchivePolicy) (domain.ArchivePolicy, error)
+	Get(context.Context, int64) (domain.ArchivePolicy, error)
+	List(context.Context) ([]domain.ArchivePolicy, error)
+}
+
+type ArchiveJobRepository interface {
+	Create(context.Context, domain.ArchiveJob) (domain.ArchiveJob, error)
+	Get(context.Context, int64) (domain.ArchiveJob, error)
+	List(context.Context, int64) ([]domain.ArchiveJob, error)
+	AttachTask(context.Context, int64, int64) error
+	UpdateState(context.Context, int64, string, int64, int64, int64, int64, int64, string, string, string) error
+}
+
 type BackupJobRepository interface {
 	Create(context.Context, domain.BackupJob) (domain.BackupJob, error)
 	Get(context.Context, int64) (domain.BackupJob, error)
