@@ -19,6 +19,7 @@ import (
 
 	"github.com/aimdotsh/dbops/internal/agentproto"
 	"github.com/aimdotsh/dbops/internal/domain"
+	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/repository"
 	"github.com/aimdotsh/dbops/internal/security"
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ import (
 type Gateway struct {
 	agents           repository.AgentRepository
 	tasks            repository.TaskRepository
+	metrics          *metricstore.Store
 	logger           *slog.Logger
 	heartbeatTimeout time.Duration
 	bootstrapToken   string
@@ -51,6 +53,7 @@ type client struct {
 func New(
 	agents repository.AgentRepository,
 	tasks repository.TaskRepository,
+	metrics *metricstore.Store,
 	logger *slog.Logger,
 	heartbeatTimeoutSeconds int,
 	bootstrapToken string,
@@ -62,6 +65,7 @@ func New(
 	return &Gateway{
 		agents:           agents,
 		tasks:            tasks,
+		metrics:          metrics,
 		logger:           logger,
 		heartbeatTimeout: time.Duration(heartbeatTimeoutSeconds) * time.Second,
 		bootstrapToken:   bootstrapToken,
@@ -308,6 +312,11 @@ func (g *Gateway) readLoop(ctx context.Context, c *client) {
 				continue
 			}
 			_ = g.agents.Heartbeat(ctx, c.agent.AgentUUID, hb.Capabilities)
+			if g.metrics != nil && c.agent.HostID != nil && len(hb.HostMetrics) > 0 {
+				if err := g.metrics.Put(ctx, "host", *c.agent.HostID, time.Now().UTC(), hb.HostMetrics); err != nil {
+					g.logger.Warn("store host metrics", "agent_id", c.agent.ID, "host_id", *c.agent.HostID, "error", err)
+				}
+			}
 		case "action_response":
 			var resp agentproto.ActionResponse
 			if err := json.Unmarshal(env.Data, &resp); err != nil {
