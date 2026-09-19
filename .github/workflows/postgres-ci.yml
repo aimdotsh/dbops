@@ -245,7 +245,7 @@ jobs:
               "username": "postgres",
               "password": "Pg-ci-password-123",
           }, expected=201)
-          if instance["db_type"] != "postgres" or instance["managed_mode"] != "imported":
+          if instance["db_type"] != "postgresql" or instance["managed_mode"] != "imported":
               raise SystemExit(f"PostgreSQL onboarding invalid: {instance}")
           instance_id = instance["id"]
 
