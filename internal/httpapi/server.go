@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/alert"
+	authsvc "github.com/aimdotsh/dbops/internal/auth"
 	"github.com/aimdotsh/dbops/internal/domain"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
@@ -23,6 +24,7 @@ import (
 
 type Server struct {
 	http             *http.Server
+	auth             *authsvc.Service
 	hosts            repository.HostRepository
 	agents           repository.AgentRepository
 	dbs              repository.DatabaseRepository
@@ -39,6 +41,7 @@ type Server struct {
 
 func New(
 	addr string,
+	authService *authsvc.Service,
 	hosts repository.HostRepository,
 	agents repository.AgentRepository,
 	dbs repository.DatabaseRepository,
@@ -58,45 +61,74 @@ func New(
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, metrics: metricsStore, alerts: alertEngine, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
+	s := &Server{
+		auth: authService, hosts: hosts, agents: agents, dbs: dbs, tasks: tasks,
+		metrics: metricsStore, alerts: alertEngine, software: softwareService,
+		mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive,
+		mysqlReplication: mysqlReplication, mysqlService: mysqlService,
+	}
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/health", s.health)
-	v1.GET("/hosts", s.listHosts)
-	v1.POST("/hosts", s.createHost)
-	v1.GET("/hosts/:id", s.getHost)
-	v1.GET("/agents", s.listAgents)
-	v1.GET("/agents/:id", s.getAgent)
-	v1.GET("/databases", s.listDatabases)
-	v1.GET("/metrics/latest", s.getLatestMetric)
-	v1.GET("/metrics/range", s.getMetricRange)
-	v1.GET("/alerts", s.listAlerts)
-	v1.POST("/alerts/:id/ack", s.acknowledgeAlert)
-	v1.GET("/software/packages", s.listSoftwarePackages)
-	v1.POST("/software/packages", s.uploadSoftwarePackage)
+	v1.POST("/auth/login", s.login)
+	v1.POST("/auth/refresh", s.refreshToken)
 	v1.GET("/software/packages/:id/download", s.downloadSoftwarePackage)
-	v1.POST("/mysql/install", s.createMySQLInstall)
-	v1.GET("/mysql/backups", s.listMySQLBackups)
-	v1.POST("/mysql/instances/:id/backups", s.createMySQLBackup)
-	v1.GET("/mysql/archive/policies", s.listMySQLArchivePolicies)
-	v1.POST("/mysql/archive/policies", s.createMySQLArchivePolicy)
-	v1.POST("/mysql/archive/policies/:id/precheck", s.precheckMySQLArchivePolicy)
-	v1.POST("/mysql/archive/policies/:id/start", s.startMySQLArchivePolicy)
-	v1.GET("/mysql/archive/jobs", s.listMySQLArchiveJobs)
-	v1.POST("/mysql/archive/jobs/:id/pause", s.pauseMySQLArchiveJob)
-	v1.POST("/mysql/archive/jobs/:id/resume", s.resumeMySQLArchiveJob)
-	v1.POST("/mysql/archive/jobs/:id/stop", s.stopMySQLArchiveJob)
-	v1.GET("/mysql/replications", s.listMySQLReplications)
-	v1.POST("/mysql/replications", s.createMySQLReplication)
-	v1.POST("/mysql/replications/:id/refresh", s.refreshMySQLReplication)
-	v1.POST("/mysql/instances/:id/start", s.startMySQLInstance)
-	v1.POST("/mysql/instances/:id/stop", s.stopMySQLInstance)
-	v1.POST("/mysql/instances/:id/restart", s.restartMySQLInstance)
-	v1.GET("/tasks", s.listTasks)
-	v1.POST("/tasks", s.createTask)
-	v1.GET("/tasks/:id", s.getTask)
-	v1.GET("/tasks/:id/steps", s.listTaskSteps)
-	v1.GET("/tasks/:id/events", s.listTaskEvents)
+
+	protected := v1.Group("")
+	protected.Use(s.authenticate)
+	protected.GET("/auth/me", s.me)
+
+	readRoles := []string{
+		authsvc.RoleSuperAdmin, authsvc.RoleDBA, authsvc.RoleOperator,
+		authsvc.RoleViewer, authsvc.RoleAuditor,
+	}
+	read := s.requireRoles(readRoles...)
+	adminDBA := s.requireRoles(authsvc.RoleSuperAdmin, authsvc.RoleDBA)
+	ops := s.requireRoles(authsvc.RoleSuperAdmin, authsvc.RoleDBA, authsvc.RoleOperator)
+	superAdmin := s.requireRoles(authsvc.RoleSuperAdmin)
+
+	protected.GET("/users", superAdmin, s.listUsers)
+	protected.POST("/users", superAdmin, s.createUser)
+
+	protected.GET("/hosts", read, s.listHosts)
+	protected.POST("/hosts", adminDBA, s.createHost)
+	protected.GET("/hosts/:id", read, s.getHost)
+	protected.GET("/agents", read, s.listAgents)
+	protected.GET("/agents/:id", read, s.getAgent)
+	protected.GET("/databases", read, s.listDatabases)
+	protected.GET("/metrics/latest", read, s.getLatestMetric)
+	protected.GET("/metrics/range", read, s.getMetricRange)
+	protected.GET("/alerts", read, s.listAlerts)
+	protected.POST("/alerts/:id/ack", ops, s.acknowledgeAlert)
+
+	protected.GET("/software/packages", read, s.listSoftwarePackages)
+	protected.POST("/software/packages", adminDBA, s.uploadSoftwarePackage)
+
+	protected.POST("/mysql/install", adminDBA, s.createMySQLInstall)
+	protected.GET("/mysql/backups", read, s.listMySQLBackups)
+	protected.POST("/mysql/instances/:id/backups", ops, s.createMySQLBackup)
+
+	protected.GET("/mysql/archive/policies", read, s.listMySQLArchivePolicies)
+	protected.POST("/mysql/archive/policies", adminDBA, s.createMySQLArchivePolicy)
+	protected.POST("/mysql/archive/policies/:id/precheck", adminDBA, s.precheckMySQLArchivePolicy)
+	protected.POST("/mysql/archive/policies/:id/start", adminDBA, s.startMySQLArchivePolicy)
+	protected.GET("/mysql/archive/jobs", read, s.listMySQLArchiveJobs)
+	protected.POST("/mysql/archive/jobs/:id/pause", ops, s.pauseMySQLArchiveJob)
+	protected.POST("/mysql/archive/jobs/:id/resume", ops, s.resumeMySQLArchiveJob)
+	protected.POST("/mysql/archive/jobs/:id/stop", adminDBA, s.stopMySQLArchiveJob)
+
+	protected.GET("/mysql/replications", read, s.listMySQLReplications)
+	protected.POST("/mysql/replications", adminDBA, s.createMySQLReplication)
+	protected.POST("/mysql/replications/:id/refresh", ops, s.refreshMySQLReplication)
+	protected.POST("/mysql/instances/:id/start", ops, s.startMySQLInstance)
+	protected.POST("/mysql/instances/:id/stop", ops, s.stopMySQLInstance)
+	protected.POST("/mysql/instances/:id/restart", ops, s.restartMySQLInstance)
+
+	protected.GET("/tasks", read, s.listTasks)
+	protected.POST("/tasks", superAdmin, s.createTask)
+	protected.GET("/tasks/:id", read, s.getTask)
+	protected.GET("/tasks/:id/steps", read, s.listTaskSteps)
+	protected.GET("/tasks/:id/events", read, s.listTaskEvents)
 
 	if websocketPath == "" {
 		websocketPath = "/api/v1/agent/ws"
