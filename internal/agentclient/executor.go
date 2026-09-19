@@ -256,7 +256,6 @@ func uint64Param(params map[string]any, key string) (uint64, error) {
 	}
 }
 
-
 func mysqlInstallPlan(params map[string]any) (map[string]any, error) {
 	execute, _ := params["execute"].(bool)
 	if execute {
@@ -271,9 +270,9 @@ func mysqlInstallPlan(params map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("data_dir is required")
 	}
 	return map[string]any{
-		"mode": "plan_only",
-		"risk": "R2",
-		"port": port,
+		"mode":     "plan_only",
+		"risk":     "R2",
+		"port":     port,
 		"data_dir": dataDir,
 		"steps": []string{
 			"CHECK_AGENT",

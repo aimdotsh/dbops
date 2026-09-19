@@ -49,11 +49,11 @@ type Config struct {
 	} `yaml:"alert"`
 
 	AgentGateway struct {
-		HeartbeatTimeoutSeconds     int    `yaml:"heartbeat_timeout_seconds"`
-		WebsocketPath               string `yaml:"websocket_path"`
-		BootstrapTokenEnv           string `yaml:"bootstrap_token_env"`
-		AllowInsecureRegistration   bool   `yaml:"allow_insecure_registration"`
-		BootstrapToken              string `yaml:"-"`
+		HeartbeatTimeoutSeconds   int    `yaml:"heartbeat_timeout_seconds"`
+		WebsocketPath             string `yaml:"websocket_path"`
+		BootstrapTokenEnv         string `yaml:"bootstrap_token_env"`
+		AllowInsecureRegistration bool   `yaml:"allow_insecure_registration"`
+		BootstrapToken            string `yaml:"-"`
 	} `yaml:"agent_gateway"`
 }
 
