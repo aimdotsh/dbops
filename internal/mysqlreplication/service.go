@@ -299,7 +299,7 @@ func (s *Service) loadRuntime(ctx context.Context, id int64) (runtime, error) {
 
 func (s *Service) dispatchPrecheck(ctx context.Context, _ int64, rt runtime) (map[string]any, error) {
 	p, _ := actionpolicy.Get("mysql.replication.precheck")
-	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: taskID, Action: "mysql.replication.precheck", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 120, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
+	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.replication.precheck", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 120, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (s *Service) dispatchCreate(ctx context.Context, _ int64, rt runtime, extra
 	for k, v := range extra {
 		params[k] = v
 	}
-	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: taskID, Action: "mysql.replication.create", Risk: string(p.Risk), Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 300, Params: params})
+	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.replication.create", Risk: string(p.Risk), Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 300, Params: params})
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (s *Service) dispatchCreate(ctx context.Context, _ int64, rt runtime, extra
 }
 func (s *Service) dispatchStatus(ctx context.Context, _ int64, rt runtime) (map[string]any, error) {
 	p, _ := actionpolicy.Get("mysql.replication.status")
-	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: taskID, Action: "mysql.replication.status", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 60, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
+	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.replication.status", Risk: string(p.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 60, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
 	if err != nil {
 		return nil, err
 	}
