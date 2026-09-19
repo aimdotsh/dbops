@@ -81,6 +81,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	serverIDRepo := reposqlite.ServerIDRepo{DB: stores.Metadata}
 	replicationRepo := reposqlite.MySQLReplicationRepo{DB: stores.Metadata}
 	backupRepo := reposqlite.BackupJobRepo{DB: stores.Metadata}
+	archivePolicyRepo := reposqlite.ArchivePolicyRepo{DB: stores.Metadata}
 	archiveRepo := reposqlite.ArchiveJobRepo{DB: stores.Metadata}
 	metricsStore := metricstore.NewStore(stores.Metrics)
 	alertEngine := alert.New(logger, cfg.Alert.Enabled, cfg.Alert.EvaluateSeconds, stores.Metadata, metricsStore)
@@ -116,7 +117,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlBackup := mysqlbackup.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
-	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archiveRepo, taskRepo, cipher, gateway)
+	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archivePolicyRepo, archiveRepo, taskRepo, cipher, gateway)
 
 	mysqlReplication := mysqlreplication.New(
 		hostRepo,
@@ -144,7 +145,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 	taskEngine.Register("mysql.backup", mysqlBackup.Handler())
-	taskEngine.Register("mysql.archive", mysqlArchive.Handler())
+	taskEngine.Register("mysql.archive.run", mysqlArchive.RunHandler())
+	taskEngine.Register("mysql.archive.control", mysqlArchive.ControlHandler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
 	taskEngine.Register("mysql.service", mysqlService.Handler())
 
