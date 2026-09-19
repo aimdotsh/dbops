@@ -103,6 +103,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlReplicationCreate(ctx, req.Params)
 	case "mysql.replication.status":
 		return mysqlReplicationStatus(ctx, req.Params)
+	case "mysql.start", "mysql.stop", "mysql.restart":
+		return mysqlServiceAction(ctx, req.Action, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
