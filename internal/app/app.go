@@ -11,6 +11,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/httpapi"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
+	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
 	"github.com/aimdotsh/dbops/internal/security"
@@ -74,6 +75,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	packageRepo := reposqlite.SoftwarePackageRepo{DB: stores.Metadata}
 	credentialRepo := reposqlite.CredentialRepo{DB: stores.Metadata}
 	serverIDRepo := reposqlite.ServerIDRepo{DB: stores.Metadata}
+	replicationRepo := reposqlite.MySQLReplicationRepo{DB: stores.Metadata}
 
 	gateway := agentgateway.New(
 		agentRepo,
@@ -104,6 +106,17 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cfg.MySQLInstall.AllowProcessMode,
 	)
 
+	mysqlReplication := mysqlreplication.New(
+		hostRepo,
+		agentRepo,
+		dbRepo,
+		credentialRepo,
+		replicationRepo,
+		taskRepo,
+		cipher,
+		gateway,
+	)
+
 	taskEngine := task.New(
 		taskRepo,
 		logger,
@@ -116,6 +129,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	})
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
+	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
 
 	return &App{
 		cfg:    cfg,
@@ -129,6 +143,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			taskRepo,
 			softwareService,
 			mysqlInstaller,
+			mysqlReplication,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
