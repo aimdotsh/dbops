@@ -26,7 +26,7 @@ type Server struct {
 	software         *software.Service
 	mysqlInstaller   *mysqlinstall.Service
 	mysqlReplication *mysqlreplication.Service
-	mysqlService *mysqlservice.Service
+	mysqlService     *mysqlservice.Service
 }
 
 func New(

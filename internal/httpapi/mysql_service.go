@@ -32,12 +32,12 @@ func (s *Server) createMySQLServiceTask(c *gin.Context, action string) {
 	_ = c.ShouldBindJSON(&body)
 	task, err := s.mysqlService.CreateTask(c.Request.Context(), mysqlservice.Request{
 		InstanceID: id,
-		Action: action,
-		Confirmed: body.Confirmed,
+		Action:     action,
+		Confirmed:  body.Confirmed,
 	})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code":"MYSQL_SERVICE_REJECTED","message":err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_SERVICE_REJECTED", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"code":"OK","message":"accepted","data":task})
+	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
 }
