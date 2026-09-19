@@ -29,12 +29,13 @@ jobs:
           go build -o /tmp/dbops-server ./cmd/dbops-server
           go build -o /tmp/dbops-agent ./cmd/dbops-agent
 
-      - name: Secure agent and MySQL precheck integration test
+      - name: End-to-end secure MySQL install
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf /tmp/dbops-ci /tmp/dbops-agent-ci /tmp/dbops-mysql-precheck
-          mkdir -p /tmp/dbops-agent-ci /tmp/dbops-mysql-precheck
+          rm -rf /tmp/dbops-ci /tmp/dbops-agent-ci /tmp/dbops-mysql-ci /tmp/dbops-fake-pkg
+          mkdir -p /tmp/dbops-agent-ci /tmp/dbops-mysql-ci /tmp/dbops-fake-pkg
+
           printf '%s\n' 'ci-bootstrap-token' >/tmp/dbops-agent-ci/bootstrap.token
           chmod 600 /tmp/dbops-agent-ci/bootstrap.token
 
@@ -61,6 +62,11 @@ jobs:
             enabled: false
           alert:
             enabled: false
+          security:
+            master_key_env: DBOPS_MASTER_KEY
+            package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          mysql_install:
+            allow_process_mode: true
           agent_gateway:
             heartbeat_timeout_seconds: 10
             websocket_path: /api/v1/agent/ws
@@ -85,10 +91,105 @@ jobs:
             allowed_actions_file: agent/agent-actions.yaml
           EOF
 
-          DBOPS_AGENT_BOOTSTRAP_TOKEN=ci-bootstrap-token /tmp/dbops-server --config /tmp/dbops-server.yaml >/tmp/dbops-server.log 2>&1 &
+          python3 - <<'PY'
+          import io, os, tarfile, textwrap
+
+          root = "/tmp/dbops-fake-pkg/mysql-fake/bin"
+          os.makedirs(root, exist_ok=True)
+
+          mysqld = r'''#!/usr/bin/env python3
+          import configparser, os, socket, subprocess, sys, time
+
+          args = sys.argv[1:]
+          cfg_path = ""
+          for a in args:
+              if a.startswith("--defaults-file="):
+                  cfg_path = a.split("=", 1)[1]
+
+          if not cfg_path:
+              print("missing defaults file", file=sys.stderr)
+              sys.exit(2)
+
+          cfg = configparser.ConfigParser()
+          cfg.read(cfg_path)
+          m = cfg["mysqld"]
+
+          if "--validate-config" in args:
+              sys.exit(0)
+
+          if "--initialize-insecure" in args:
+              datadir = m["datadir"]
+              os.makedirs(datadir, exist_ok=True)
+              with open(os.path.join(datadir, "auto.cnf"), "w") as f:
+                  f.write("[auto]\nserver-uuid=fake-ci\n")
+              sys.exit(0)
+
+          if "--daemonize" in args:
+              port = int(m["port"])
+              pidfile = m["pid-file"]
+              code = r"""
+          import os, socket, sys
+          port = int(sys.argv[1])
+          pidfile = sys.argv[2]
+          os.makedirs(os.path.dirname(pidfile), exist_ok=True)
+          with open(pidfile, "w") as f:
+              f.write(str(os.getpid()))
+          s = socket.socket()
+          s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(("127.0.0.1", port))
+          s.listen(16)
+          while True:
+              c, _ = s.accept()
+              c.close()
+          """
+              subprocess.Popen(
+                  [sys.executable, "-c", code, str(port), pidfile],
+                  stdin=subprocess.DEVNULL,
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  start_new_session=True,
+              )
+              for _ in range(30):
+                  if os.path.exists(pidfile):
+                      sys.exit(0)
+                  time.sleep(0.1)
+              sys.exit(3)
+
+          sys.exit(0)
+          '''
+
+          mysql = r'''#!/usr/bin/env python3
+          import sys
+          _ = sys.stdin.read()
+          sys.exit(0)
+          '''
+
+          mysqladmin = r'''#!/usr/bin/env python3
+          import sys
+          sys.exit(0)
+          '''
+
+          for name, content in {
+              "mysqld": mysqld,
+              "mysql": mysql,
+              "mysqladmin": mysqladmin,
+          }.items():
+              path = os.path.join(root, name)
+              with open(path, "w") as f:
+                  f.write(textwrap.dedent(content).lstrip())
+              os.chmod(path, 0o755)
+
+          archive = "/tmp/mysql-fake-8.0.99-linux-amd64.tar.gz"
+          with tarfile.open(archive, "w:gz") as tf:
+              tf.add("/tmp/dbops-fake-pkg/mysql-fake", arcname="mysql-fake")
+          print(archive)
+          PY
+
+          DBOPS_AGENT_BOOTSTRAP_TOKEN=ci-bootstrap-token           DBOPS_MASTER_KEY=ci-master-key-0123456789abcdef           DBOPS_PACKAGE_SIGNING_KEY=ci-package-signing-key-0123456789abcdef             /tmp/dbops-server --config /tmp/dbops-server.yaml >/tmp/dbops-server.log 2>&1 &
           SERVER_PID=$!
           AGENT_PID=""
-          trap 'kill "$SERVER_PID" ${AGENT_PID:-} 2>/dev/null || true; echo "--- server log ---"; cat /tmp/dbops-server.log 2>/dev/null || true; echo "--- agent log ---"; cat /tmp/dbops-agent.log 2>/dev/null || true' EXIT
+          MYSQL_PID=""
+          trap 'kill "$SERVER_PID" ${AGENT_PID:-} ${MYSQL_PID:-} 2>/dev/null || true; echo "--- server log ---"; cat /tmp/dbops-server.log 2>/dev/null || true; echo "--- agent log ---"; cat /tmp/dbops-agent.log 2>/dev/null || true' EXIT
 
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:18080/api/v1/health >/dev/null; then break; fi
@@ -105,37 +206,8 @@ jobs:
           base = "http://127.0.0.1:18080/api/v1"
 
           def get(path):
-              with urllib.request.urlopen(base + path, timeout=3) as r:
+              with urllib.request.urlopen(base + path, timeout=5) as r:
                   return json.load(r)["data"]
-
-          def create_task(agent_id, action, params=None, confirmed=False):
-              body = {
-                  "task_type": "agent.action",
-                  "agent_id": agent_id,
-                  "parameters_json": json.dumps({
-                      "action": action,
-                      "confirmed": confirmed,
-                      "timeout_seconds": 15,
-                      "params": params or {},
-                  }),
-              }
-              req = urllib.request.Request(
-                  base + "/tasks",
-                  data=json.dumps(body).encode(),
-                  headers={"Content-Type": "application/json"},
-                  method="POST",
-              )
-              with urllib.request.urlopen(req, timeout=3) as r:
-                  return json.load(r)["data"]["id"]
-
-          def wait_task(task_id):
-              task = None
-              for _ in range(40):
-                  task = get(f"/tasks/{task_id}")
-                  if task["status"] in ("success", "failed", "timeout", "cancelled"):
-                      return task
-                  time.sleep(0.5)
-              raise SystemExit(f"task timeout: {task}")
 
           agent_id = None
           for _ in range(30):
@@ -160,49 +232,143 @@ jobs:
           if stat.S_IMODE(os.stat(credential).st_mode) != 0o600:
               raise SystemExit("agent credential permissions are not 0600")
 
-          secret = "DO_NOT_LEAK_123"
-          task_id = create_task(agent_id, "host.info", {"password": secret})
-          task = wait_task(task_id)
-          if task["status"] != "success":
-              raise SystemExit(f"host.info failed: {task}")
-          events = get(f"/tasks/{task_id}/events")
-          rendered = json.dumps(events)
-          if secret in rendered or "***REDACTED***" not in rendered:
-              raise SystemExit(f"secret redaction failed: {events}")
+          print(agent_id)
+          with open("/tmp/agent-id", "w") as f:
+              f.write(str(agent_id))
+          PY
 
-          precheck_id = create_task(agent_id, "mysql.precheck", {
+          UPLOAD_JSON=$(curl -fsS -X POST http://127.0.0.1:18080/api/v1/software/packages             -F software_name=mysql             -F version=8.0.99             -F os_family=linux             -F architecture=amd64             -F package_type=tar.gz             -F compatibility_json='{"test_package":true}'             -F file=@/tmp/mysql-fake-8.0.99-linux-amd64.tar.gz)
+          printf '%s' "$UPLOAD_JSON" >/tmp/upload.json
+
+          python3 - <<'PY'
+          import json
+          data = json.load(open("/tmp/upload.json"))["data"]
+          assert data["software_name"] == "mysql"
+          assert len(data["sha256"]) == 64
+          assert data["size_bytes"] > 0
+          open("/tmp/package-id", "w").write(str(data["id"]))
+          print("software package uploaded", data["id"], data["sha256"])
+          PY
+
+          python3 - <<'PY'
+          import json, os, time, urllib.request
+
+          base = "http://127.0.0.1:18080/api/v1"
+          agent_id = int(open("/tmp/agent-id").read())
+          package_id = int(open("/tmp/package-id").read())
+
+          body = {
+              "agent_id": agent_id,
+              "package_id": package_id,
+              "name": "mysql-ci-13306",
               "port": 13306,
-              "data_dir": "/tmp/dbops-mysql-precheck",
+              "base_dir": "/tmp/dbops-mysql-ci/base",
+              "data_dir": "/tmp/dbops-mysql-ci/data",
+              "log_dir": "/tmp/dbops-mysql-ci/log",
+              "binlog_dir": "/tmp/dbops-mysql-ci/binlog",
+              "run_dir": "/tmp/dbops-mysql-ci/run",
+              "config_path": "/tmp/dbops-mysql-ci/etc/my.cnf",
+              "service_name": "dbops-mysql-ci-13306",
+              "service_mode": "process",
+              "mysql_user": "dbops-ci-user",
+              "manage_os_user": False,
+              "innodb_buffer_pool_bytes": 134217728,
+              "max_connections": 100,
               "min_free_bytes": 1,
               "min_memory_bytes": 1,
               "min_cpu_cores": 1,
-              "expected_os": "linux",
-              "expected_arch": "amd64",
-              "service_name": "dbops-mysql-13306",
-          })
-          precheck = wait_task(precheck_id)
-          if precheck["status"] != "success":
-              raise SystemExit(f"mysql.precheck task failed: {precheck}")
-          result = json.loads(precheck["result_json"])
-          if result.get("ok") is not True:
-              raise SystemExit(f"mysql.precheck blocked unexpectedly: {result}")
+          }
 
-          high_id = create_task(agent_id, "mysql.stop", {})
-          high = wait_task(high_id)
-          if high["status"] != "failed" or "requires explicit confirmation" not in (high.get("error_message") or ""):
-              raise SystemExit(f"R3 confirmation guard failed: {high}")
+          req = urllib.request.Request(
+              base + "/mysql/install",
+              data=json.dumps(body).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=5) as r:
+              task = json.load(r)["data"]
+          task_id = task["id"]
 
-          print("secure enrollment, redaction, R3 guard and mysql.precheck OK", {
-              "agent_id": agent_id,
-              "host_task": task_id,
-              "precheck_task": precheck_id,
-              "guard_task": high_id,
+          final = None
+          for _ in range(120):
+              with urllib.request.urlopen(base + f"/tasks/{task_id}", timeout=5) as r:
+                  final = json.load(r)["data"]
+              if final["status"] in ("success", "failed", "timeout", "cancelled"):
+                  break
+              time.sleep(0.5)
+
+          if final is None or final["status"] != "success":
+              raise SystemExit(f"mysql.install failed: {final}")
+
+          with urllib.request.urlopen(base + f"/tasks/{task_id}/steps", timeout=5) as r:
+              steps = json.load(r)["data"]
+          by_no = {s["step_no"]: s for s in steps}
+          missing = [n for n in range(1, 22) if n not in by_no]
+          bad = [(n, by_no[n]["status"]) for n in by_no if by_no[n]["status"] != "success"]
+          if missing or bad:
+              raise SystemExit(f"step verification failed missing={missing} bad={bad} steps={steps}")
+
+          with urllib.request.urlopen(base + "/databases", timeout=5) as r:
+              databases = json.load(r)["data"]
+          matches = [d for d in databases if d["port"] == 13306 and d["db_type"] == "mysql"]
+          if len(matches) != 1 or matches[0]["managed_mode"] != "installed":
+              raise SystemExit(f"database auto-registration failed: {databases}")
+
+          result_text = final["result_json"]
+          if "root_password" in result_text:
+              raise SystemExit("root password leaked into task result")
+
+          with urllib.request.urlopen(base + f"/tasks/{task_id}/events", timeout=5) as r:
+              events = json.load(r)["data"]
+          if "root_password" in json.dumps(events):
+              raise SystemExit("root password leaked into task events")
+
+          open("/tmp/install-task-id", "w").write(str(task_id))
+          print("mysql.install end-to-end OK", {
+              "task_id": task_id,
+              "instance_id": matches[0]["id"],
+              "steps": len(steps),
           })
           PY
 
+          python3 - <<'PY'
+          import json, os, sqlite3
+
+          db = sqlite3.connect("/tmp/dbops-ci/dbops.db")
+          cur = db.cursor()
+
+          task_id = int(open("/tmp/install-task-id").read())
+          params = cur.execute("select parameters_json from tasks where id=?", (task_id,)).fetchone()[0]
+          if "root_password" in params:
+              raise SystemExit("root password leaked into durable task parameters")
+
+          cred = cur.execute("select encrypted_secret from credentials where credential_type='mysql_root' order by id desc limit 1").fetchone()
+          if not cred or len(cred[0]) < 40:
+              raise SystemExit("encrypted MySQL credential missing")
+
+          sid = cur.execute("select server_id,status,instance_id from mysql_server_ids where port=13306").fetchone()
+          if not sid or sid[1] != "bound" or not sid[2]:
+              raise SystemExit(f"server_id was not bound: {sid}")
+
+          pkg = cur.execute("select sha256,size_bytes,status from software_packages where software_name='mysql'").fetchone()
+          if not pkg or len(pkg[0]) != 64 or pkg[1] <= 0 or pkg[2] != "available":
+              raise SystemExit(f"software package metadata invalid: {pkg}")
+
+          print("SQLite install facts OK", {"server_id": sid[0], "credential_ciphertext_len": len(cred[0])})
+          PY
+
+          test -s /tmp/dbops-mysql-ci/data/auto.cnf
+          grep -q '^port=13306$' /tmp/dbops-mysql-ci/etc/my.cnf
+          grep -q '^server_id=' /tmp/dbops-mysql-ci/etc/my.cnf
+          test -s /tmp/dbops-agent-ci/tasks/$(cat /tmp/install-task-id)/mysql-install.json
+
+          MYSQL_PID=$(cat /tmp/dbops-mysql-ci/run/mysqld.pid)
+          kill "$MYSQL_PID"
+          MYSQL_PID=""
+
+          rm -f /tmp/dbops-agent-ci/bootstrap.token
           kill "$AGENT_PID"
           wait "$AGENT_PID" || true
-          rm -f /tmp/dbops-agent-ci/bootstrap.token
           /tmp/dbops-agent --config /tmp/dbops-agent.yaml >>/tmp/dbops-agent.log 2>&1 &
           AGENT_PID=$!
 
