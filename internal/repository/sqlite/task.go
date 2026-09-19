@@ -5,12 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/domain"
 )
 
 type TaskRepo struct{ DB *sql.DB }
+
+var taskClaimMu sync.Mutex
 
 func (r TaskRepo) Create(ctx context.Context, t domain.Task) (domain.Task, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -54,6 +57,9 @@ func (r TaskRepo) List(ctx context.Context, limit int) ([]domain.Task, error) {
 }
 
 func (r TaskRepo) ClaimNext(ctx context.Context, owner string, leaseSeconds int) (*domain.Task, error) {
+	taskClaimMu.Lock()
+	defer taskClaimMu.Unlock()
+
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
