@@ -1,6 +1,7 @@
 package agentclient
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -114,8 +115,8 @@ func mysqlBackup(ctx context.Context, workDir string, params map[string]any) (ma
 
 	cmd := exec.CommandContext(ctx, dumpBin, args...)
 	cmd.Stdout = gz
-	var stderr strings.Builder
-	cmd.Stderr = &limitedWriter{w: &stderr, remaining: 16 << 10}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		_ = gz.Close()
 		return nil, fmt.Errorf("mysqldump failed: %w: %s", err, strings.TrimSpace(stderr.String()))
