@@ -323,7 +323,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 	marker.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	_ = writeInstallMarker(markerPath, marker)
 	_ = os.Remove(packagePath)
-	return map[string]any{"agent_install_complete": true, "port": p.Port, "server_id": p.ServerID, "base_dir": p.BaseDir, "data_dir": p.DataDir, "config_path": p.ConfigPath, "service_name": p.ServiceName, "service_mode": p.ServiceMode, "marker": markerPath}, nil
+	return map[string]any{"agent_install_complete": true, "port": p.Port, "server_id": p.ServerID, "base_dir": p.BaseDir, "data_dir": p.DataDir, "log_dir": p.LogDir, "binlog_dir": p.BinlogDir, "run_dir": p.RunDir, "config_path": p.ConfigPath, "service_name": p.ServiceName, "service_mode": p.ServiceMode, "marker": markerPath}, nil
 }
 
 func parseMySQLInstallParams(m map[string]any) (mysqlInstallParams, error) {
