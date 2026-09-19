@@ -346,11 +346,14 @@ func (g *Gateway) recordResponse(ctx context.Context, resp agentproto.ActionResp
 	})
 
 	if resp.Step.Code != "" {
-		status := "running"
-		if resp.Status == "success" {
-			status = "success"
-		} else if resp.Status == "failed" || resp.Status == "cancelled" || resp.Status == "timeout" {
-			status = "failed"
+		status := resp.Step.Status
+		if status == "" {
+			status = "running"
+			if resp.Status == "success" {
+				status = "success"
+			} else if resp.Status == "failed" || resp.Status == "cancelled" || resp.Status == "timeout" {
+				status = "failed"
+			}
 		}
 		_ = g.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID:         resp.TaskID,
