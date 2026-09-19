@@ -19,7 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 type Client struct {
 	cfg      Config
@@ -66,6 +66,11 @@ func (c *Client) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	credential, bootstrapToken, err := LoadAuth(c.cfg)
+	if err != nil {
+		return err
+	}
+
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 		TLSClientConfig: &tls.Config{
@@ -87,15 +92,42 @@ func (c *Client) runOnce(ctx context.Context) error {
 		IPAddress:       primaryIP(),
 		Architecture:    runtime.GOARCH,
 		ProtocolVersion: agentproto.ProtocolVersion,
+		Auth: agentproto.Auth{
+			BootstrapToken: bootstrapToken,
+			Credential:     credential,
+		},
 	}
 	if err := c.writeEnvelope(conn, "hello", hello); err != nil {
 		return err
 	}
-	c.logger.Info("connected to dbops server", "server", wsURL, "agent_uuid", c.agentID)
 
-	errCh := make(chan error, 1)
+	var registeredEnv agentproto.Envelope
+	if err := conn.ReadJSON(&registeredEnv); err != nil {
+		return fmt.Errorf("registration response: %w", err)
+	}
+	if registeredEnv.Type != "registered" {
+		return fmt.Errorf("unexpected registration response %q", registeredEnv.Type)
+	}
+	var registration agentproto.Registration
+	if err := json.Unmarshal(registeredEnv.Data, &registration); err != nil {
+		return fmt.Errorf("decode registration: %w", err)
+	}
+	if registration.AgentUUID != c.agentID {
+		return fmt.Errorf("registration identity mismatch")
+	}
+	if registration.Credential != "" {
+		if err := SaveCredential(c.cfg, registration.Credential); err != nil {
+			return fmt.Errorf("persist credential: %w", err)
+		}
+		c.logger.Info("agent enrollment completed", "agent_uuid", c.agentID, "agent_id", registration.AgentID)
+	} else {
+		c.logger.Info("connected to dbops server", "server", wsURL, "agent_uuid", c.agentID, "agent_id", registration.AgentID)
+	}
+
 	go func() {
-		errCh <- c.heartbeatLoop(ctx, conn)
+		if err := c.heartbeatLoop(ctx, conn); err != nil && ctx.Err() == nil {
+			_ = conn.Close()
+		}
 	}()
 
 	for {
