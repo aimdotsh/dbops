@@ -202,3 +202,17 @@ type ArchiveJob struct {
 	VerificationStatus string     `json:"verification_status,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
 }
+
+
+type User struct {
+	ID          int64      `json:"id"`
+	Username    string     `json:"username"`
+	PasswordHash string    `json:"-"`
+	DisplayName string     `json:"display_name,omitempty"`
+	Email       string     `json:"email,omitempty"`
+	Status      string     `json:"status"`
+	Roles       []string   `json:"roles,omitempty"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
