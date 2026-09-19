@@ -20,6 +20,8 @@ type AgentRepository interface {
 	GetByUUID(context.Context, string) (domain.Agent, error)
 	List(context.Context) ([]domain.Agent, error)
 	BindHostByIdentity(context.Context, string, string, string) (*int64, error)
+	GetCredentialHash(context.Context, string) (string, error)
+	SetCredentialHash(context.Context, string, string) error
 }
 
 type DatabaseRepository interface {
