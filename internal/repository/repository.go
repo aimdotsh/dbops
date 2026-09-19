@@ -29,6 +29,7 @@ type DatabaseRepository interface {
 	List(context.Context) ([]domain.DatabaseInstance, error)
 	Get(context.Context, int64) (domain.DatabaseInstance, error)
 	CreateInstalled(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
+	UpdateStatus(context.Context, int64, string) error
 }
 
 type SoftwarePackageRepository interface {
