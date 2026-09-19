@@ -50,10 +50,10 @@ type Config struct {
 	} `yaml:"alert"`
 
 	Security struct {
-		MasterKeyEnv          string `yaml:"master_key_env"`
-		PackageSigningKeyEnv  string `yaml:"package_signing_key_env"`
-		MasterKey             string `yaml:"-"`
-		PackageSigningKey     string `yaml:"-"`
+		MasterKeyEnv         string `yaml:"master_key_env"`
+		PackageSigningKeyEnv string `yaml:"package_signing_key_env"`
+		MasterKey            string `yaml:"-"`
+		PackageSigningKey    string `yaml:"-"`
 	} `yaml:"security"`
 
 	MySQLInstall struct {

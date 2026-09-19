@@ -10,18 +10,18 @@ import (
 
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
-	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/aimdotsh/dbops/internal/repository"
+	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
-	http   *http.Server
-	hosts  repository.HostRepository
-	agents repository.AgentRepository
-	dbs    repository.DatabaseRepository
-	tasks  repository.TaskRepository
-	software *software.Service
+	http           *http.Server
+	hosts          repository.HostRepository
+	agents         repository.AgentRepository
+	dbs            repository.DatabaseRepository
+	tasks          repository.TaskRepository
+	software       *software.Service
 	mysqlInstaller *mysqlinstall.Service
 }
 

@@ -177,9 +177,9 @@ func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req 
 	defer c.running.Add(-1)
 
 	defaultStep := agentproto.Step{
-		No: 1,
-		Code: strings.ToUpper(strings.ReplaceAll(req.Action, ".", "_")),
-		Name: req.Action,
+		No:     1,
+		Code:   strings.ToUpper(strings.ReplaceAll(req.Action, ".", "_")),
+		Name:   req.Action,
 		Status: "running",
 	}
 	if req.Action != "mysql.install" {

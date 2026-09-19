@@ -105,7 +105,7 @@ func (s *Service) CreateTask(ctx context.Context, req InstallRequest) (domain.Ta
 	}
 	_ = s.tasks.AddEvent(ctx, domain.TaskEvent{
 		TaskID: created.ID, EventType: "created", Level: "INFO",
-		Message: "MySQL installation task created",
+		Message:     "MySQL installation task created",
 		PayloadJSON: fmt.Sprintf(`{"package_id":%d,"version":%q,"port":%d}`, pkg.ID, pkg.Version, normalized.Port),
 	})
 	return created, nil
@@ -160,7 +160,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			BaseDir: req.BaseDir, DataDir: req.DataDir, LogDir: req.LogDir,
 			BinlogDir: req.BinlogDir, RunDir: req.RunDir,
 			InnoDBBufferPoolBytes: req.InnoDBBufferPoolBytes,
-			MaxConnections: req.MaxConnections, LongQueryTime: req.LongQueryTime,
+			MaxConnections:        req.MaxConnections, LongQueryTime: req.LongQueryTime,
 			Collation: req.Collation,
 		})
 		if err != nil {
@@ -170,31 +170,31 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 
 		policy, _ := actionpolicy.Get("mysql.install")
 		actionParams := map[string]any{
-			"execute":                  true,
-			"package_url":              s.software.SignedDownloadURL(pkg.ID, 2*time.Hour),
-			"package_sha256":           pkg.SHA256,
-			"package_type":             pkg.PackageType,
-			"version":                  pkg.Version,
-			"expected_os":              pkg.OSFamily,
-			"expected_arch":            pkg.Architecture,
-			"port":                     req.Port,
-			"server_id":                reservation.ServerID,
-			"base_dir":                 req.BaseDir,
-			"data_dir":                 req.DataDir,
-			"log_dir":                  req.LogDir,
-			"binlog_dir":               req.BinlogDir,
-			"run_dir":                  req.RunDir,
-			"config_path":              req.ConfigPath,
-			"config_text":              configText,
-			"service_name":             req.ServiceName,
-			"service_mode":             req.ServiceMode,
-			"mysql_user":               req.MySQLUser,
-			"manage_os_user":           req.ManageOSUser,
-			"root_password":            rootPassword,
-			"min_free_bytes":           req.MinFreeBytes,
-			"min_memory_bytes":         req.MinMemoryBytes,
-			"min_cpu_cores":            req.MinCPUCores,
-			"credential_id":            credential.ID,
+			"execute":          true,
+			"package_url":      s.software.SignedDownloadURL(pkg.ID, 2*time.Hour),
+			"package_sha256":   pkg.SHA256,
+			"package_type":     pkg.PackageType,
+			"version":          pkg.Version,
+			"expected_os":      pkg.OSFamily,
+			"expected_arch":    pkg.Architecture,
+			"port":             req.Port,
+			"server_id":        reservation.ServerID,
+			"base_dir":         req.BaseDir,
+			"data_dir":         req.DataDir,
+			"log_dir":          req.LogDir,
+			"binlog_dir":       req.BinlogDir,
+			"run_dir":          req.RunDir,
+			"config_path":      req.ConfigPath,
+			"config_text":      configText,
+			"service_name":     req.ServiceName,
+			"service_mode":     req.ServiceMode,
+			"mysql_user":       req.MySQLUser,
+			"manage_os_user":   req.ManageOSUser,
+			"root_password":    rootPassword,
+			"min_free_bytes":   req.MinFreeBytes,
+			"min_memory_bytes": req.MinMemoryBytes,
+			"min_cpu_cores":    req.MinCPUCores,
+			"credential_id":    credential.ID,
 		}
 
 		resp, dispatchErr := s.dispatcher.Dispatch(ctx, *t.AgentID, agentproto.ActionRequest{
@@ -207,10 +207,10 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 
 		metadata, _ := json.Marshal(map[string]any{
-			"server_id": reservation.ServerID,
-			"package_id": pkg.ID,
-			"service_name": req.ServiceName,
-			"service_mode": req.ServiceMode,
+			"server_id":      reservation.ServerID,
+			"package_id":     pkg.ID,
+			"service_name":   req.ServiceName,
+			"service_mode":   req.ServiceMode,
 			"install_result": resp.Result,
 		})
 		instance, err := s.dbs.CreateInstalled(ctx, domain.DatabaseInstance{
@@ -253,14 +253,14 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		})
 
 		return map[string]any{
-			"instance_id": instance.ID,
-			"name": instance.Name,
-			"version": instance.Version,
-			"host_id": instance.HostID,
-			"port": instance.Port,
-			"server_id": reservation.ServerID,
+			"instance_id":   instance.ID,
+			"name":          instance.Name,
+			"version":       instance.Version,
+			"host_id":       instance.HostID,
+			"port":          instance.Port,
+			"server_id":     reservation.ServerID,
 			"credential_id": credential.ID,
-			"status": "online",
+			"status":        "online",
 		}, nil
 	}
 }

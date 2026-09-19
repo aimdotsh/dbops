@@ -7,17 +7,17 @@ import (
 )
 
 type ConfigValues struct {
-	Port int
-	ServerID int
-	BaseDir string
-	DataDir string
-	LogDir string
-	BinlogDir string
-	RunDir string
+	Port                  int
+	ServerID              int
+	BaseDir               string
+	DataDir               string
+	LogDir                string
+	BinlogDir             string
+	RunDir                string
 	InnoDBBufferPoolBytes int64
-	MaxConnections int
-	LongQueryTime string
-	Collation string
+	MaxConnections        int
+	LongQueryTime         string
+	Collation             string
 }
 
 const productionTemplate = "[mysqld]\n" +
@@ -62,17 +62,17 @@ func RenderConfig(v ConfigValues) (string, error) {
 	}
 
 	replacements := map[string]string{
-		"{{PORT}}": strconv.Itoa(v.Port),
-		"{{SERVER_ID}}": strconv.Itoa(v.ServerID),
-		"{{BASEDIR}}": v.BaseDir,
-		"{{DATADIR}}": v.DataDir,
-		"{{LOGDIR}}": v.LogDir,
-		"{{BINLOGDIR}}": v.BinlogDir,
-		"{{RUNDIR}}": v.RunDir,
-		"{{LONG_QUERY_TIME}}": v.LongQueryTime,
-		"{{COLLATION}}": v.Collation,
+		"{{PORT}}":                    strconv.Itoa(v.Port),
+		"{{SERVER_ID}}":               strconv.Itoa(v.ServerID),
+		"{{BASEDIR}}":                 v.BaseDir,
+		"{{DATADIR}}":                 v.DataDir,
+		"{{LOGDIR}}":                  v.LogDir,
+		"{{BINLOGDIR}}":               v.BinlogDir,
+		"{{RUNDIR}}":                  v.RunDir,
+		"{{LONG_QUERY_TIME}}":         v.LongQueryTime,
+		"{{COLLATION}}":               v.Collation,
 		"{{INNODB_BUFFER_POOL_SIZE}}": strconv.FormatInt(v.InnoDBBufferPoolBytes, 10),
-		"{{MAX_CONNECTIONS}}": strconv.Itoa(v.MaxConnections),
+		"{{MAX_CONNECTIONS}}":         strconv.Itoa(v.MaxConnections),
 	}
 	out := productionTemplate
 	for key, value := range replacements {
