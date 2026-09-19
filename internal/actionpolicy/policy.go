@@ -26,6 +26,7 @@ var policies = map[string]Policy{
 	"host.disk.list":              {Action: "host.disk.list", Risk: R0},
 	"host.port.check":             {Action: "host.port.check", Risk: R0},
 	"host.directory.check":        {Action: "host.directory.check", Risk: R0},
+	"mysql.metrics":               {Action: "mysql.metrics", Risk: R0},
 	"mysql.precheck":              {Action: "mysql.precheck", Risk: R0},
 	"mysql.install":               {Action: "mysql.install", Risk: R2},
 	"mysql.start":                 {Action: "mysql.start", Risk: R1},

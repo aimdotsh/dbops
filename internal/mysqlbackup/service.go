@@ -247,3 +247,12 @@ func int64Value(v any) int64 {
 	}
 	return 0
 }
+
+func (s *Service) Metrics(ctx context.Context, id int64) (any, error) {
+	rt, err := s.loadRuntime(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{Action: "mysql.metrics", Risk: "R0", ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 10, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password}})
+	return resp.Result, err
+}

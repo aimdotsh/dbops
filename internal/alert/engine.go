@@ -38,12 +38,13 @@ type Event struct {
 }
 
 type Engine struct {
-	logger   *slog.Logger
-	enabled  bool
-	interval time.Duration
-	db       *sql.DB
-	metrics  *metricstore.Store
-	rules    []Rule
+	notifications NotificationConfig
+	logger        *slog.Logger
+	enabled       bool
+	interval      time.Duration
+	db            *sql.DB
+	metrics       *metricstore.Store
+	rules         []Rule
 
 	mu        sync.Mutex
 	firstTrue map[string]time.Time
@@ -128,6 +129,24 @@ func (e *Engine) EvaluateOnce(ctx context.Context) error {
 		}
 	}
 
+	databases, err := e.metrics.ListLatest(ctx, "database")
+	if err != nil {
+		return err
+	}
+	for _, snap := range databases {
+		value, known := metricValue("up", snap, now)
+		if !known {
+			continue
+		}
+		fingerprint := fmt.Sprintf("DatabaseDown:database:%d", snap.ResourceID)
+		if value == 0 || now.Sub(snap.CollectedAt) > 2*time.Minute {
+			if err = e.upsertFiring(ctx, "database", snap.ResourceID, fingerprint, "P1", "database is unreachable or monitoring is stale", "{}", now); err != nil {
+				return err
+			}
+		} else if err = e.resolve(ctx, fingerprint, now); err != nil {
+			return err
+		}
+	}
 	// Resolve events whose resource disappeared from latest metrics only after a fresh
 	// evaluation explicitly sees a false condition. Missing metrics remain open because
 	// heartbeat timeout is itself represented by the snapshot age.
@@ -164,25 +183,40 @@ func (e *Engine) upsertFiring(ctx context.Context, resourceType string, resource
 		_, err = e.db.ExecContext(ctx,
 			"UPDATE alert_events SET last_seen_at=?,severity=?,message=?,metadata_json=? WHERE id=?",
 			now.Format(time.RFC3339), severity, message, metadata, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return e.enqueue(ctx, id, "FIRING")
 	}
 	if err != sql.ErrNoRows {
 		return err
 	}
-	_, err = e.db.ExecContext(ctx, `
+	res, err := e.db.ExecContext(ctx, `
 INSERT INTO alert_events(resource_type,resource_id,fingerprint,status,severity,message,started_at,last_seen_at,metadata_json)
 VALUES(?,?,?,'FIRING',?,?,?,?,?)
 `, resourceType, resourceID, fingerprint, severity, message, now.Format(time.RFC3339), now.Format(time.RFC3339), metadata)
-	return err
+	if err != nil {
+		return err
+	}
+	id, err = res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return e.enqueue(ctx, id, "FIRING")
 }
 
 func (e *Engine) resolve(ctx context.Context, fingerprint string, now time.Time) error {
-	_, err := e.db.ExecContext(ctx, `
-UPDATE alert_events
-SET status='RESOLVED',resolved_at=?,last_seen_at=?
-WHERE fingerprint=? AND status IN ('FIRING','ACKNOWLEDGED')
-`, now.Format(time.RFC3339), now.Format(time.RFC3339), fingerprint)
-	return err
+	_, err := e.db.ExecContext(ctx, `UPDATE alert_events SET status='RESOLVED',resolved_at=?,last_seen_at=? WHERE fingerprint=? AND status IN ('FIRING','ACKNOWLEDGED')`, now.Format(time.RFC3339), now.Format(time.RFC3339), fingerprint)
+	if err != nil {
+		return err
+	}
+	var id int64
+	if err = e.db.QueryRowContext(ctx, "SELECT id FROM alert_events WHERE fingerprint=? AND status='RESOLVED' ORDER BY id DESC LIMIT 1", fingerprint).Scan(&id); err == sql.ErrNoRows {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return e.enqueue(ctx, id, "RESOLVED")
 }
 
 func (e *Engine) List(ctx context.Context, status string, limit int) ([]Event, error) {

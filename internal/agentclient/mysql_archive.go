@@ -277,7 +277,7 @@ func archiveDefaultsFile(workDir, prefix, runDir, password string) (string, func
 		return "", nil, err
 	}
 	password = strings.ReplaceAll(password, "\n", "")
-	if _, err := fmt.Fprintf(f, "[client]\nuser=root\npassword=%s\nsocket=%s/mysql.sock\n", password, runDir); err != nil {
+	if _, err := fmt.Fprintf(f, "[client]\nuser=root\npassword=%s\nsocket=%s/mysql.sock\n", mysqlOption(password), runDir); err != nil {
 		f.Close()
 		cleanup()
 		return "", nil, err

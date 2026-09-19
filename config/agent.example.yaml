@@ -9,6 +9,9 @@ security:
   bootstrap_token_file: /etc/dbops-agent/bootstrap.token
   credential_file: /var/lib/dbops-agent/agent.credential
   verify_server_tls: true
+  # ca_file: /etc/dbops-agent/server-ca.crt
+  # cert_file: /etc/dbops-agent/agent.crt
+  # key_file: /etc/dbops-agent/agent.key
 executor:
   max_concurrent_tasks: 2
   allowed_actions_file: /etc/dbops-agent/actions.yaml

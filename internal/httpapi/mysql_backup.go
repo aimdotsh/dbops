@@ -53,3 +53,17 @@ func (s *Server) listMySQLBackups(c *gin.Context) {
 	}
 	ok(c, items)
 }
+
+func (s *Server) createMySQLRestore(c *gin.Context) {
+	var req mysqlbackup.RestoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER"})
+		return
+	}
+	t, err := s.mysqlBackup.CreateRestoreTask(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "MYSQL_RESTORE_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(202, gin.H{"code": "OK", "data": t})
+}

@@ -3,13 +3,15 @@ package domain
 import "time"
 
 type Host struct {
-	ID          int64     `json:"id"`
-	Hostname    string    `json:"hostname"`
-	IPAddress   string    `json:"ip_address"`
-	Status      string    `json:"status"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ProjectID     *int64    `json:"project_id,omitempty"`
+	EnvironmentID *int64    `json:"environment_id,omitempty"`
+	ID            int64     `json:"id"`
+	Hostname      string    `json:"hostname"`
+	IPAddress     string    `json:"ip_address"`
+	Status        string    `json:"status"`
+	Description   string    `json:"description,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Agent struct {

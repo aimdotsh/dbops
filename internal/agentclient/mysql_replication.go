@@ -151,7 +151,7 @@ func runMySQLQuery(ctx context.Context, baseDir, runDir, password, query string,
 	}
 	defer os.RemoveAll(work)
 	cfg := filepath.Join(work, "client.cnf")
-	content := "[client]\nuser=root\npassword=" + password + "\nsocket=" + runDir + "/mysql.sock\n"
+	content := "[client]\nuser=root\npassword=" + mysqlOption(password) + "\nsocket=" + runDir + "/mysql.sock\n"
 	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		return "", err
 	}

@@ -26,6 +26,9 @@ func TestCredentialPersistenceAndBootstrapFallback(t *testing.T) {
 		t.Fatalf("unexpected initial auth: credential=%q token=%q", credential, token)
 	}
 
+	if err := os.WriteFile(cfg.Security.CredentialFile, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := SaveCredential(cfg, "persistent-value"); err != nil {
 		t.Fatal(err)
 	}

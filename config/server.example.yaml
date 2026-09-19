@@ -1,6 +1,9 @@
 server:
   listen: 0.0.0.0:8080
   public_url: http://127.0.0.1:8080
+  # tls_cert_file: /etc/dbops/server.crt
+  # tls_key_file: /etc/dbops/server.key
+  # agent_ca_file: /etc/dbops/agent-ca.crt
   data_dir: /data/dbops
 
 storage:
@@ -18,9 +21,11 @@ sqlite:
 
 task:
   workers: 8
-  max_per_host: 2
+  # Same-agent ordinary tasks are serialized; this legacy field is reserved.
+  max_per_host: 1
   scan_interval_seconds: 2
   lease_seconds: 60
+  # Renewal is automatically lease_seconds / 3.
   lease_renew_seconds: 20
 
 scheduler:
@@ -51,3 +56,9 @@ agent_gateway:
   websocket_path: /api/v1/agent/ws
   bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
   allow_insecure_registration: false
+  require_mtls: false
+
+metrics_retention:
+  days_5m: 30
+  days_1h: 180
+  days_1d: 730

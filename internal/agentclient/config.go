@@ -20,6 +20,9 @@ type Config struct {
 		LogDir           string `yaml:"log_dir"`
 	} `yaml:"agent"`
 	Security struct {
+		CAFile             string `yaml:"ca_file"`
+		CertFile           string `yaml:"cert_file"`
+		KeyFile            string `yaml:"key_file"`
 		BootstrapTokenFile string `yaml:"bootstrap_token_file"`
 		CredentialFile     string `yaml:"credential_file"`
 		VerifyServerTLS    bool   `yaml:"verify_server_tls"`
@@ -109,7 +112,23 @@ func SaveCredential(cfg Config, credential string) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.Security.CredentialFile), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.Security.CredentialFile, []byte(credential+"\n"), 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(cfg.Security.CredentialFile), ".credential-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.WriteString(credential + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), cfg.Security.CredentialFile)
 }
 
 func bytesTrimSpace(b []byte) []byte {

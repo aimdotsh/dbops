@@ -2,7 +2,6 @@ package agentclient
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -21,7 +20,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/agentproto"
@@ -66,7 +64,7 @@ type installMarker struct {
 	Error       string `json:"error,omitempty"`
 }
 
-func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequest, report ProgressReporter) (result map[string]any, retErr error) {
+func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequest, report ProgressReporter, client *http.Client) (result map[string]any, retErr error) {
 	p, err := parseMySQLInstallParams(req.Params)
 	if err != nil {
 		return nil, err
@@ -83,9 +81,20 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		return nil, err
 	}
 	markerPath := filepath.Join(taskDir, "mysql-install.json")
+	bootstrapCreated := false
+	if _, err := os.Lstat(markerPath); err == nil {
+		return nil, errors.New("installation marker already exists; verify previous execution before retry")
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
 	marker := installMarker{TaskID: req.TaskID, Status: "running", Port: p.Port, DataDir: p.DataDir, BaseDir: p.BaseDir, ConfigPath: p.ConfigPath, ServiceName: p.ServiceName, UpdatedAt: time.Now().UTC().Format(time.RFC3339)}
-	_ = writeInstallMarker(markerPath, marker)
+	if err := writeInstallMarker(markerPath, marker); err != nil {
+		return nil, err
+	}
 	defer func() {
+		if bootstrapCreated {
+			_ = os.Remove(filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql"))
+		}
 		if retErr != nil {
 			marker.Status = "failed"
 			marker.Error = retErr.Error()
@@ -153,6 +162,11 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		if err != nil {
 			return nil, err
 		}
+		if entries, err := os.ReadDir(p.DataDir); err == nil && len(entries) > 0 {
+			return nil, errors.New("data_dir must be empty")
+		} else if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
 		if s.ValidMySQLData {
 			return nil, fmt.Errorf("existing MySQL data detected in %s", p.DataDir)
 		}
@@ -183,7 +197,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 
 	packagePath := filepath.Join(taskDir, "mysql-package.tgz")
 	if err := runStep(7, "DOWNLOAD_PACKAGE", "Download package", func() (any, error) {
-		n, err := downloadFile(ctx, p.PackageURL, packagePath)
+		n, err := downloadFile(ctx, p.PackageURL, packagePath, client)
 		return map[string]any{"bytes": n}, err
 	}); err != nil {
 		return nil, err
@@ -214,13 +228,18 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 	}
 	if err := runStep(10, "CREATE_DIRECTORIES", "Create directories", func() (any, error) {
 		for _, d := range []string{p.BaseDir, p.DataDir, p.LogDir, p.BinlogDir, p.RunDir, filepath.Dir(p.ConfigPath)} {
-			if err := os.MkdirAll(d, 0o750); err != nil {
+			if err := os.MkdirAll(d, 0o755); err != nil {
 				return nil, err
 			}
 		}
 		if mysqlUID >= 0 {
 			for _, d := range []string{p.DataDir, p.LogDir, p.BinlogDir, p.RunDir} {
-				_ = os.Chown(d, mysqlUID, mysqlGID)
+				if err := os.Chmod(d, 0750); err != nil {
+					return nil, err
+				}
+				if err := os.Chown(d, mysqlUID, mysqlGID); err != nil {
+					return nil, err
+				}
 			}
 		}
 		return map[string]any{"created": true}, nil
@@ -237,9 +256,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		if _, err := os.Stat(filepath.Join(p.BaseDir, "bin", "mysqld")); err != nil {
 			return nil, fmt.Errorf("package does not contain bin/mysqld after extraction")
 		}
-		if mysqlUID >= 0 {
-			_ = chownTree(p.BaseDir, mysqlUID, mysqlGID)
-		}
+
 		return map[string]any{"base_dir": p.BaseDir}, nil
 	}); err != nil {
 		return nil, err
@@ -248,7 +265,20 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		if strings.TrimSpace(p.ConfigText) == "" {
 			return nil, errors.New("config_text is empty")
 		}
-		if err := os.WriteFile(p.ConfigPath, []byte(p.ConfigText), 0o640); err != nil {
+		// init_file runs account hardening before MySQL accepts connections.
+		bootstrapSQL := filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql")
+		sqlText := "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + p.RootPassword + "';\n"
+		if err := writeNewFile(bootstrapSQL, []byte(sqlText), 0600); err != nil {
+			return nil, err
+		}
+		bootstrapCreated = true
+		if mysqlUID >= 0 {
+			if err := os.Chown(bootstrapSQL, mysqlUID, mysqlGID); err != nil {
+				return nil, err
+			}
+		}
+		config := strings.Replace(p.ConfigText, "[mysqld]", "[mysqld]\ninit_file="+bootstrapSQL, 1)
+		if err := writeNewFile(p.ConfigPath, []byte(config), 0o640); err != nil {
 			return nil, err
 		}
 		if mysqlUID >= 0 {
@@ -295,7 +325,11 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 			out, err := runCommand(ctx, "systemctl", "enable", "--now", p.ServiceName+".service")
 			return map[string]any{"output": out}, err
 		}
-		out, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysqld"), "--defaults-file="+p.ConfigPath, "--daemonize")
+		args := []string{"--defaults-file=" + p.ConfigPath, "--daemonize"}
+		if p.ManageOSUser && os.Geteuid() == 0 {
+			args = append(args, "--user="+p.MySQLUser)
+		}
+		out, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysqld"), args...)
 		return map[string]any{"output": out}, err
 	}); err != nil {
 		return nil, err
@@ -361,20 +395,26 @@ func parseMySQLInstallParams(m map[string]any) (mysqlInstallParams, error) {
 	if p.PackageURL == "" || len(p.PackageSHA256) != 64 || p.RootPassword == "" || p.ConfigText == "" {
 		return p, errors.New("missing package, password, or configuration parameters")
 	}
+	if p.Port < 1 || p.Port > 65535 || p.ServerID <= 0 || !validServiceName(p.ServiceName) || !validServiceName(p.MySQLUser) || !safeSQLSecret(p.RootPassword) {
+		return p, errors.New("invalid installation identity or credentials")
+	}
 	for _, v := range []string{p.BaseDir, p.DataDir, p.LogDir, p.BinlogDir, p.RunDir, p.ConfigPath} {
-		if !filepath.IsAbs(v) || strings.ContainsAny(v, "\r\n\x00") {
+		if !filepath.IsAbs(v) || filepath.Clean(v) == "/" || strings.ContainsAny(v, " \t\r\n\x00%\\\"'") {
 			return p, errors.New("invalid installation path")
 		}
 	}
 	return p, nil
 }
 
-func downloadFile(ctx context.Context, url, path string) (int64, error) {
+func downloadFile(ctx context.Context, url, path string, client *http.Client) (int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, err
 	}
@@ -565,7 +605,7 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 func writeSystemdUnit(p mysqlInstallParams) (string, error) {
 	unitPath := filepath.Join("/etc/systemd/system", p.ServiceName+".service")
 	unit := "[Unit]\nDescription=DBOps MySQL " + strconv.Itoa(p.Port) + "\nAfter=network.target\n\n[Service]\nType=simple\nUser=" + p.MySQLUser + "\nGroup=" + p.MySQLUser + "\nExecStart=" + filepath.Join(p.BaseDir, "bin", "mysqld") + " --defaults-file=" + p.ConfigPath + "\nRestart=on-failure\nLimitNOFILE=65535\n\n[Install]\nWantedBy=multi-user.target\n"
-	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+	if err := writeNewFile(unitPath, []byte(unit), 0o644); err != nil {
 		return "", err
 	}
 	return unitPath, nil
@@ -590,30 +630,23 @@ func waitTCP(ctx context.Context, port int, timeout time.Duration) error {
 }
 
 func initializeRootAccount(ctx context.Context, p mysqlInstallParams, taskDir string) error {
-	clientCfg := filepath.Join(taskDir, "root-bootstrap.cnf")
-	cfg := "[client]\nuser=root\nsocket=" + p.RunDir + "/mysql.sock\n"
-	if err := os.WriteFile(clientCfg, []byte(cfg), 0o600); err != nil {
-		return err
-	}
-	defer os.Remove(clientCfg)
-	sqlText := "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + p.RootPassword + "';\n"
-	cmd := exec.CommandContext(ctx, filepath.Join(p.BaseDir, "bin", "mysql"), "--defaults-extra-file="+clientCfg)
-	cmd.Stdin = strings.NewReader(sqlText)
-	var buf bytes.Buffer
-	lw := &limitedBuffer{buf: &buf, limit: 64 << 10}
-	cmd.Stdout = lw
-	cmd.Stderr = lw
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("initialize root account: %w: %s", err, strings.TrimSpace(buf.String()))
-	}
 	verifyCfg := filepath.Join(taskDir, "root-verify.cnf")
-	verify := "[client]\nuser=root\npassword=" + p.RootPassword + "\nsocket=" + p.RunDir + "/mysql.sock\n"
+	verify := "[client]\nuser=root\npassword=" + mysqlOption(p.RootPassword) + "\nsocket=" + p.RunDir + "/mysql.sock\n"
 	if err := os.WriteFile(verifyCfg, []byte(verify), 0o600); err != nil {
 		return err
 	}
 	defer os.Remove(verifyCfg)
-	_, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysqladmin"), "--defaults-extra-file="+verifyCfg, "ping")
-	return err
+	// SELECT verifies authentication; mysqladmin ping can succeed on access denied.
+	_, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysql"), "--defaults-extra-file="+verifyCfg, "--batch", "--skip-column-names", "-e", "SELECT 1")
+	if err != nil {
+		return err
+	}
+	// Persist the normal config before removing the bootstrap file, so restarts
+	// do not depend on a deleted init_file. Never return or log the password.
+	if err = os.WriteFile(p.ConfigPath, []byte(p.ConfigText), 0640); err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql"))
 }
 
 func writeInstallMarker(path string, m installMarker) error {
@@ -628,5 +661,18 @@ func writeInstallMarker(path string, m installMarker) error {
 	return os.Rename(tmp, path)
 }
 
-var _ = bufio.ErrInvalidUnreadByte
-var _ = syscall.SIGTERM
+func writeNewFile(path string, contents []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(contents); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}

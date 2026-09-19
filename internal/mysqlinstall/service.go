@@ -362,7 +362,7 @@ func validateAbsolutePath(name, path string) error {
 	if !filepath.IsAbs(path) || filepath.Clean(path) == "/" {
 		return fmt.Errorf("%s must be an absolute non-root path", name)
 	}
-	if strings.ContainsAny(path, "\r\n\x00") {
+	if strings.ContainsAny(path, " \t\r\n\x00%\\\"'") {
 		return fmt.Errorf("%s contains invalid characters", name)
 	}
 	return nil

@@ -28,6 +28,9 @@ actions:
     timeout: 15
     risk: R0
     params: [path, require_empty, min_free_bytes]
+  - name: mysql.metrics
+    timeout: 15
+    risk: R0
   - name: mysql.precheck
     timeout: 120
     risk: R0

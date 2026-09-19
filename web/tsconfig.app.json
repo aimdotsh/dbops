@@ -17,7 +17,8 @@
     "types": [
       "vite/client"
     ],
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "noEmit": true
   },
   "include": [
     "src/**/*.ts",

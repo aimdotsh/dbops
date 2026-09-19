@@ -5,10 +5,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,8 +22,9 @@ import (
 type ProgressReporter func(agentproto.ActionResponse)
 
 type Executor struct {
-	specs   map[string]agentproto.ActionSpec
-	workDir string
+	specs      map[string]agentproto.ActionSpec
+	workDir    string
+	httpClient atomic.Pointer[http.Client]
 }
 
 func LoadExecutor(path string) (*Executor, error) {
@@ -90,11 +93,13 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return portCheck(ctx, req.Params)
 	case "host.directory.check":
 		return directoryCheck(ctx, req.Params)
+	case "mysql.metrics":
+		return mysqlMetrics(ctx, req.Params)
 	case "mysql.precheck":
 		return mysqlPrecheck(ctx, req.Params)
 	case "mysql.install":
 		if execute, _ := req.Params["execute"].(bool); execute {
-			return mysqlInstall(ctx, e.workDir, req, report)
+			return mysqlInstall(ctx, e.workDir, req, report, e.httpClient.Load())
 		}
 		return mysqlInstallPlan(req.Params)
 	case "mysql.replication.precheck":
@@ -105,6 +110,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlReplicationStatus(ctx, req.Params)
 	case "mysql.start", "mysql.stop", "mysql.restart":
 		return mysqlServiceAction(ctx, req.Action, req.Params)
+	case "mysql.restore":
+		return mysqlRestore(ctx, e.workDir, req.Params)
 	case "mysql.backup":
 		return mysqlBackup(ctx, e.workDir, req.Params)
 	case "mysql.archive.precheck":

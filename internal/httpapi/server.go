@@ -2,8 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"github.com/aimdotsh/dbops/internal/actionpolicy"
+	"github.com/aimdotsh/dbops/internal/security"
+	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,14 +25,18 @@ import (
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	oraclesvc "github.com/aimdotsh/dbops/internal/oracle"
+	"github.com/aimdotsh/dbops/internal/platformbackup"
 	pgsvc "github.com/aimdotsh/dbops/internal/postgres"
 	"github.com/aimdotsh/dbops/internal/repository"
+	"github.com/aimdotsh/dbops/internal/scheduler"
 	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/gin-gonic/gin"
 )
 
 type Server struct {
 	http             *http.Server
+	platformBackup   *platformbackup.Service
+	policies         *scheduler.Policies
 	auth             *authsvc.Service
 	hosts            repository.HostRepository
 	agents           repository.AgentRepository
@@ -47,6 +57,8 @@ type Server struct {
 
 func New(
 	addr string,
+	platformBackup *platformbackup.Service,
+	policies *scheduler.Policies,
 	authService *authsvc.Service,
 	hosts repository.HostRepository,
 	agents repository.AgentRepository,
@@ -71,7 +83,7 @@ func New(
 	r.Use(gin.Recovery())
 
 	s := &Server{
-		auth: authService, hosts: hosts, agents: agents, dbs: dbs, tasks: tasks,
+		policies: policies, platformBackup: platformBackup, auth: authService, hosts: hosts, agents: agents, dbs: dbs, tasks: tasks,
 		metrics: metricsStore, alerts: alertEngine, software: softwareService,
 		mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive,
 		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService, postgres: postgresService, doris: dorisService,
@@ -84,7 +96,7 @@ func New(
 	v1.GET("/software/packages/:id/download", s.downloadSoftwarePackage)
 
 	protected := v1.Group("")
-	protected.Use(s.authenticate)
+	protected.Use(s.authenticate, s.scopeGuard, s.auditMutation)
 	protected.GET("/auth/me", s.me)
 
 	readRoles := []string{
@@ -96,6 +108,20 @@ func New(
 	ops := s.requireRoles(authsvc.RoleSuperAdmin, authsvc.RoleDBA, authsvc.RoleOperator)
 	superAdmin := s.requireRoles(authsvc.RoleSuperAdmin)
 
+	protected.GET("/backup-schedules", superAdmin, s.listSchedules)
+	protected.POST("/backup-schedules", superAdmin, s.createSchedule)
+	protected.PUT("/backup-schedules/:id", superAdmin, s.toggleSchedule)
+	protected.GET("/platform/backups", superAdmin, s.listPlatformBackups)
+	protected.POST("/platform/backups", superAdmin, s.createPlatformBackup)
+
+	protected.GET("/audit", s.requireRoles(authsvc.RoleSuperAdmin, authsvc.RoleAuditor), s.listAudit)
+	protected.POST("/mysql/precheck", adminDBA, s.createMySQLPrecheck)
+	protected.GET("/resource-scopes", superAdmin, s.listScopes)
+	protected.POST("/resource-scopes", superAdmin, s.setScope)
+	protected.GET("/projects", superAdmin, s.listProjects)
+	protected.POST("/projects", superAdmin, s.createProject)
+	protected.GET("/environments", superAdmin, s.listEnvironments)
+	protected.POST("/environments", superAdmin, s.createEnvironment)
 	protected.GET("/users", superAdmin, s.listUsers)
 	protected.POST("/users", superAdmin, s.createUser)
 
@@ -108,12 +134,14 @@ func New(
 	protected.GET("/metrics/latest", read, s.getLatestMetric)
 	protected.GET("/metrics/range", read, s.getMetricRange)
 	protected.GET("/alerts", read, s.listAlerts)
+	protected.POST("/alerts/:id/silence", ops, s.silenceAlert)
 	protected.POST("/alerts/:id/ack", ops, s.acknowledgeAlert)
 
 	protected.GET("/software/packages", read, s.listSoftwarePackages)
 	protected.POST("/software/packages", adminDBA, s.uploadSoftwarePackage)
 
 	protected.POST("/mysql/install", adminDBA, s.createMySQLInstall)
+	protected.POST("/mysql/restores", adminDBA, s.createMySQLRestore)
 	protected.GET("/mysql/backups", read, s.listMySQLBackups)
 	protected.POST("/mysql/instances/:id/backups", ops, s.createMySQLBackup)
 
@@ -155,6 +183,7 @@ func New(
 
 	protected.GET("/tasks", read, s.listTasks)
 	protected.POST("/tasks", superAdmin, s.createTask)
+	protected.POST("/tasks/:id/resolve", adminDBA, s.resolveInterruptedTask)
 	protected.GET("/tasks/:id", read, s.getTask)
 	protected.GET("/tasks/:id/steps", read, s.listTaskSteps)
 	protected.GET("/tasks/:id/events", read, s.listTaskEvents)
@@ -174,9 +203,16 @@ func New(
 }
 
 func (s *Server) Start() error {
+	listener, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return err
+	}
+	if s.http.TLSConfig != nil {
+		listener = tls.NewListener(listener, s.http.TLSConfig)
+	}
 	go func() {
-		if err := s.http.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			panic(err)
+		if err := s.http.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("HTTP server stopped", "error", err)
 		}
 	}()
 	return nil
@@ -284,6 +320,24 @@ func (s *Server) createTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": "agent_id is required for agent.action"})
 		return
 	}
+	if in.TaskType != "system.echo" && in.TaskType != "agent.action" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_TASK_TYPE", "message": "use the database operation endpoint"})
+		return
+	}
+	if in.TaskType == "agent.action" {
+		var params struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal([]byte(in.ParametersJSON), &params); err != nil {
+			c.JSON(400, gin.H{"code": "INVALID_PARAMETER"})
+			return
+		}
+		policy, known := actionpolicy.Get(params.Action)
+		if !known || policy.Risk != actionpolicy.R0 {
+			c.JSON(400, gin.H{"code": "INVALID_ACTION", "message": "generic tasks only accept read-only actions; use the operation endpoint"})
+			return
+		}
+	}
 	out, err := s.tasks.Create(c.Request.Context(), in)
 	if err != nil {
 		fail(c, err)
@@ -352,6 +406,27 @@ func parseID(c *gin.Context) (int64, bool) {
 }
 
 func ok(c *gin.Context, data any) {
+	switch v := data.(type) {
+	case domain.Task:
+		v.ParametersJSON = security.RedactJSON(v.ParametersJSON)
+		v.ResultJSON = security.RedactJSON(v.ResultJSON)
+		data = v
+	case []domain.Task:
+		for i := range v {
+			v[i].ParametersJSON = security.RedactJSON(v[i].ParametersJSON)
+			v[i].ResultJSON = security.RedactJSON(v[i].ResultJSON)
+		}
+		data = v
+	}
+
+	if v, exists := c.Get("dbops.server"); exists {
+		var err error
+		data, err = v.(*Server).filterScoped(c, data)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"code": "OK", "message": "success", "data": data})
 }
 

@@ -1,0 +1,15 @@
+.git
+.local-test
+web/node_modules
+web/*.tsbuildinfo
+*.db
+*.db-shm
+*.db-wal
+*.docx
+diagrams
+
+internal/httpapi/web/dist
+dbops-server
+dbops-agent
+dbops-restore
+.local-data
