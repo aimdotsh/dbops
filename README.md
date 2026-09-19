@@ -13,7 +13,7 @@ DBOps 是面向 DBA 和基础设施运维人员的数据库运维与生命周期
 - Durable Task Worker、Lease、重启恢复骨架和 Resource Lock。
 - Host / Agent / Database / Task 基础 API。
 - `dbops-agent` 主动 WebSocket 连接。
-- Agent Hello、注册、Host 绑定、Heartbeat、离线检测。
+- Agent Hello、首次 Bootstrap Token 注册、持久身份凭据、Host 绑定、Heartbeat、离线检测。
 - Agent Action YAML 白名单。
 - Task -> Agent Action -> Progress -> Step/Event -> Result 完整执行链路。
 - 当前 Agent 已实现的安全只读 Action：
@@ -21,9 +21,10 @@ DBOps 是面向 DBA 和基础设施运维人员的数据库运维与生命周期
   - `host.disk.list`
   - `host.port.check`
   - `host.directory.check`
+  - `mysql.precheck`
 - GitHub Actions 自动执行 gofmt、单元测试、Server/Agent 编译和端到端 Agent Gateway 测试。
 
-尚未实现的主要功能包括认证/RBAC、Agent Bootstrap Token/mTLS、Vue Web、MySQL 安装与复制、Oracle 表空间操作、备份恢复和 pt-archiver 归档。
+尚未实现的主要功能包括用户 JWT/RBAC、Agent mTLS、Vue Web、MySQL 真实安装执行与复制、Oracle 表空间操作、备份恢复和 pt-archiver 归档。`mysql.install` 当前只生成受控安装计划，`execute=true` 会被拒绝，直到软件仓库、SHA256 校验、systemd 与回滚 marker 完成。
 
 ## 本地构建
 
@@ -66,7 +67,8 @@ docker run -d \
 源码调试：
 
 ```bash
-go run ./cmd/dbops-server --config config/server.example.yaml
+DBOPS_AGENT_BOOTSTRAP_TOKEN='dev-bootstrap-secret' \\
+  go run ./cmd/dbops-server --config config/server.example.yaml
 ```
 
 健康检查：
@@ -85,6 +87,8 @@ curl http://127.0.0.1:8080/api/v1/health
 sudo mkdir -p /etc/dbops-agent
 sudo cp agent/agent-actions.yaml /etc/dbops-agent/actions.yaml
 sudo cp config/agent.example.yaml /etc/dbops-agent/agent.yaml
+printf '%s\\n' 'replace-with-one-time-bootstrap-secret' | sudo tee /etc/dbops-agent/bootstrap.token >/dev/null
+sudo chmod 600 /etc/dbops-agent/bootstrap.token
 ```
 
 修改 `/etc/dbops-agent/agent.yaml` 中的 Server URL 后启动：
@@ -92,6 +96,8 @@ sudo cp config/agent.example.yaml /etc/dbops-agent/agent.yaml
 ```bash
 ./dbops-agent --config /etc/dbops-agent/agent.yaml
 ```
+
+首次连接使用 Bootstrap Token；Server 随机生成持久 Agent Credential，Agent 默认写入 `/var/lib/dbops-agent/agent.credential`，权限为 `0600`。之后即使移除 Bootstrap Token 文件，也使用持久凭据重连。
 
 Agent 会主动连接：
 
@@ -127,7 +133,7 @@ curl http://127.0.0.1:8080/api/v1/tasks/1/steps
 curl http://127.0.0.1:8080/api/v1/tasks/1/events
 ```
 
-Agent 不提供任意 Shell 或任意 SQL 接口。只有 `agent/agent-actions.yaml` 白名单内且当前 Agent 版本已经实现的 Action 才能执行。
+Agent 不提供任意 Shell 或任意 SQL 接口。只有 `agent/agent-actions.yaml` 白名单内且当前 Agent 版本已经实现的 Action 才能执行。Action 使用 R0~R4 风险分级，R3/R4 必须在任务参数中显式传入 `confirmed: true`；敏感键会在 Task Event 中统一脱敏。
 
 ## 设计资料
 
@@ -143,9 +149,13 @@ Agent 不提供任意 Shell 或任意 SQL 接口。只有 `agent/agent-actions.y
 - `reference/ADR-001-single-container.md`：架构决策记录。
 - `reference/ENTERPRISE_UPGRADE.md`：未来 PostgreSQL/Redis/VictoriaMetrics 升级路径。
 
+## MySQL PreCheck
+
+当前 `mysql.precheck` 已检查 OS/Arch、CPU、内存、端口、DataDir MySQL 标记、磁盘余量、目标 mysqld 冲突和 systemd unit 冲突；时间同步目前返回 warn，软件包兼容性由后续 Software Repository 接入。
+
 ## 下一阶段
 
-下一阶段按照设计文档进入 MySQL 生命周期第一条业务链路：
+下一阶段继续 MySQL 生命周期第一条业务链路：
 
 ```text
 Host/Agent
@@ -158,4 +168,4 @@ Host/Agent
   -> Register Database Instance
 ```
 
-在执行真实 MySQL 变更前，会先补齐 Agent Bootstrap Token、Secret 脱敏和高风险 Action 的安全边界。
+安全边界已经完成，下一步实现 Software Package Repository、SHA256 下载校验、参数模板、server_id 分配、受控 systemd 安装和失败回滚 marker，再开放 `mysql.install execute=true`。
