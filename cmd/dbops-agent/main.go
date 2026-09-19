@@ -34,6 +34,7 @@ func main() {
 		slog.Error("load action allowlist", "error", err)
 		os.Exit(1)
 	}
+	executor.SetWorkDir(cfg.Agent.WorkDir)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
