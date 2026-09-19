@@ -158,6 +158,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error 
 				AgentUUID:    c.agentID,
 				RunningTasks: int(c.running.Load()),
 				Capabilities: c.executor.Capabilities(),
+				HostMetrics:  collectHostMetrics(),
 			}
 			if err := c.writeEnvelope(conn, "heartbeat", hb); err != nil {
 				return err
