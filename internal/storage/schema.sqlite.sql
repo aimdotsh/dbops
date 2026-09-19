@@ -265,3 +265,49 @@ CREATE TABLE IF NOT EXISTS alert_events (
 );
 CREATE INDEX IF NOT EXISTS idx_alert_events_status_severity ON alert_events(status,severity,started_at);
 CREATE INDEX IF NOT EXISTS idx_alert_events_fingerprint ON alert_events(fingerprint,status);
+
+
+CREATE TABLE IF NOT EXISTS archive_policies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  source_instance_id INTEGER NOT NULL REFERENCES database_instances(id),
+  source_database TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  archive_column TEXT,
+  where_template TEXT NOT NULL,
+  retention_days INTEGER,
+  destination_type TEXT NOT NULL,
+  destination_instance_id INTEGER REFERENCES database_instances(id),
+  destination_database TEXT,
+  destination_table TEXT,
+  batch_size INTEGER NOT NULL DEFAULT 5000,
+  txn_size INTEGER,
+  sleep_ms INTEGER NOT NULL DEFAULT 200,
+  max_replication_lag INTEGER NOT NULL DEFAULT 30,
+  max_threads_running INTEGER,
+  delete_source INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  options_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_archive_policies_source ON archive_policies(source_instance_id,enabled);
+
+CREATE TABLE IF NOT EXISTS archive_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id INTEGER REFERENCES tasks(id),
+  policy_id INTEGER NOT NULL REFERENCES archive_policies(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  started_at TEXT,
+  finished_at TEXT,
+  scanned_rows INTEGER NOT NULL DEFAULT 0,
+  archived_rows INTEGER NOT NULL DEFAULT 0,
+  deleted_rows INTEGER NOT NULL DEFAULT 0,
+  failed_rows INTEGER NOT NULL DEFAULT 0,
+  speed_rows_sec INTEGER,
+  last_processed_key TEXT,
+  pause_reason TEXT,
+  verification_status TEXT,
+  error_message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_archive_jobs_policy_status ON archive_jobs(policy_id,status);
