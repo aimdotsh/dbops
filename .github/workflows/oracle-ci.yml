@@ -1,0 +1,374 @@
+name: Oracle Capacity CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/oracle/**'
+      - 'internal/agentclient/oracle*'
+      - 'internal/httpapi/**'
+      - 'internal/app/**'
+      - 'internal/repository/**'
+      - 'agent/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/oracle-ci.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/oracle/**'
+      - 'internal/agentclient/oracle*'
+      - 'internal/httpapi/**'
+      - 'internal/app/**'
+      - 'internal/repository/**'
+      - 'agent/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+
+jobs:
+  oracle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Build binaries
+        run: |
+          go build -o /tmp/dbops-server ./cmd/dbops-server
+          go build -o /tmp/dbops-agent ./cmd/dbops-agent
+
+      - name: Build fake Oracle home
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dbops-oracle-ci
+          mkdir -p /tmp/dbops-oracle-ci/oracle/bin /tmp/dbops-oracle-ci/oradata /tmp/dbops-oracle-ci/agent /tmp/dbops-oracle-ci/server
+          printf '%s\n' 'oracle-bootstrap-token' >/tmp/dbops-oracle-ci/agent/bootstrap.token
+          chmod 600 /tmp/dbops-oracle-ci/agent/bootstrap.token
+
+          cat >/tmp/dbops-oracle-ci/oracle/bin/sqlplus <<'PY'
+          #!/usr/bin/env python3
+          import json, os, re, sys
+
+          script_path = next((x[1:] for x in sys.argv[1:] if x.startswith("@")), "")
+          if not script_path:
+              sys.exit(2)
+          script = open(script_path).read()
+          state_path = "/tmp/dbops-oracle-ci/oracle-state.json"
+
+          if os.path.exists(state_path):
+              state = json.load(open(state_path))
+          else:
+              state = {
+                  "tablespaces": {"USERS": {"status": "ONLINE", "contents": "PERMANENT"}},
+                  "datafiles": [{
+                      "file_id": 1,
+                      "tablespace": "USERS",
+                      "file_name": "/tmp/dbops-oracle-ci/oradata/users01.dbf",
+                      "bytes": 104857600,
+                      "autoextensible": True,
+                      "maxbytes": 1073741824,
+                      "increment_by": 8192,
+                  }],
+              }
+
+          def save():
+              with open(state_path, "w") as f:
+                  json.dump(state, f)
+
+          if "v$instance i CROSS JOIN v$database d" in script:
+              print("19.21.0.0.0|READ WRITE|PRIMARY|2026-09-19 09:00:00")
+              sys.exit(0)
+
+          if "FROM dba_tablespaces t" in script:
+              total = sum(x["bytes"] for x in state["datafiles"] if x["tablespace"] == "USERS")
+              free = total // 2
+              maxbytes = sum(x["maxbytes"] for x in state["datafiles"] if x["tablespace"] == "USERS")
+              print(f"USERS|ONLINE|PERMANENT|{total}|{free}|{maxbytes}")
+              sys.exit(0)
+
+          if "ORDER BY file_id" in script and "FROM dba_data_files" in script:
+              match = re.search(r"tablespace_name=UPPER\('([^']+)'\)", script)
+              ts = (match.group(1) if match else "").upper()
+              for x in state["datafiles"]:
+                  if x["tablespace"] == ts:
+                      auto = "YES" if x["autoextensible"] else "NO"
+                      print(f"{x['file_id']}|{x['file_name']}|{x['bytes']}|{auto}|{x['maxbytes']}|{x['increment_by']}")
+              sys.exit(0)
+
+          if "COUNT(*) FROM dba_tablespaces" in script:
+              match = re.search(r"UPPER\('([^']+)'\)", script)
+              name = (match.group(1) if match else "").upper()
+              print("1" if name in state["tablespaces"] else "0")
+              sys.exit(0)
+
+          if "COUNT(*) FROM dba_data_files WHERE file_name=" in script:
+              match = re.search(r"file_name='([^']+)'", script)
+              path = match.group(1) if match else ""
+              print("1" if any(x["file_name"] == path for x in state["datafiles"]) else "0")
+              sys.exit(0)
+
+          if "SELECT bytes FROM dba_data_files WHERE file_name=" in script:
+              match = re.search(r"file_name='([^']+)'", script)
+              path = match.group(1) if match else ""
+              found = next((x for x in state["datafiles"] if x["file_name"] == path), None)
+              if found:
+                  print(found["bytes"])
+                  sys.exit(0)
+              sys.exit(0)
+
+          add = re.search(r'ALTER TABLESPACE "([^"]+)" ADD DATAFILE \'([^\']+)\' SIZE ([0-9]+)M', script)
+          if add:
+              ts, path, size = add.group(1).upper(), add.group(2), int(add.group(3))
+              state["datafiles"].append({
+                  "file_id": max(x["file_id"] for x in state["datafiles"]) + 1,
+                  "tablespace": ts,
+                  "file_name": path,
+                  "bytes": size * 1024 * 1024,
+                  "autoextensible": "AUTOEXTEND ON" in script,
+                  "maxbytes": 1073741824,
+                  "increment_by": 8192,
+              })
+              save()
+              sys.exit(0)
+
+          resize = re.search(r"ALTER DATABASE DATAFILE '([^']+)' RESIZE ([0-9]+)M", script)
+          if resize:
+              path, size = resize.group(1), int(resize.group(2))
+              found = next((x for x in state["datafiles"] if x["file_name"] == path), None)
+              if not found:
+                  sys.exit(3)
+              found["bytes"] = size * 1024 * 1024
+              save()
+              sys.exit(0)
+
+          print("unsupported fake sqlplus script", file=sys.stderr)
+          print(script, file=sys.stderr)
+          sys.exit(4)
+          PY
+          chmod +x /tmp/dbops-oracle-ci/oracle/bin/sqlplus
+
+      - name: Start DBOps and Agent
+        shell: bash
+        run: |
+          cat >/tmp/dbops-oracle-ci/server.yaml <<'EOF'
+          server:
+            listen: 127.0.0.1:18083
+            public_url: http://127.0.0.1:18083
+            data_dir: /tmp/dbops-oracle-ci/server
+          storage:
+            metadata_db: /tmp/dbops-oracle-ci/server/dbops.db
+            metrics_db: /tmp/dbops-oracle-ci/server/metrics.db
+            software_dir: /tmp/dbops-oracle-ci/server/software
+            task_work_dir: /tmp/dbops-oracle-ci/server/task-work
+            log_dir: /tmp/dbops-oracle-ci/server/logs
+            platform_backup_dir: /tmp/dbops-oracle-ci/server/platform-backup
+          sqlite:
+            metadata_max_open_conns: 4
+            metrics_max_open_conns: 2
+          task:
+            workers: 2
+            scan_interval_seconds: 1
+            lease_seconds: 30
+          scheduler:
+            enabled: false
+          alert:
+            enabled: false
+          security:
+            master_key_env: DBOPS_MASTER_KEY
+            package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          auth:
+            enabled: false
+          agent_gateway:
+            heartbeat_timeout_seconds: 10
+            websocket_path: /api/v1/agent/ws
+            bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+            allow_insecure_registration: false
+          EOF
+
+          cat >/tmp/dbops-oracle-ci/agent.yaml <<'EOF'
+          server:
+            url: http://127.0.0.1:18083
+          agent:
+            id: oracle-ci-agent
+            heartbeat_seconds: 1
+            work_dir: /tmp/dbops-oracle-ci/agent
+            log_dir: /tmp/dbops-oracle-ci/agent/logs
+          security:
+            bootstrap_token_file: /tmp/dbops-oracle-ci/agent/bootstrap.token
+            credential_file: /tmp/dbops-oracle-ci/agent/agent.credential
+            verify_server_tls: true
+          executor:
+            max_concurrent_tasks: 2
+            allowed_actions_file: agent/agent-actions.yaml
+          EOF
+
+          DBOPS_MASTER_KEY='oracle-master-key-0123456789abcdef'           DBOPS_PACKAGE_SIGNING_KEY='oracle-package-key-0123456789abcdef'           DBOPS_AGENT_BOOTSTRAP_TOKEN='oracle-bootstrap-token'             /tmp/dbops-server --config /tmp/dbops-oracle-ci/server.yaml >/tmp/dbops-oracle-ci/server.log 2>&1 &
+          echo $! >/tmp/dbops-oracle-ci/server.pid
+
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18083/api/v1/health >/dev/null && break
+            sleep 1
+          done
+          /tmp/dbops-agent --config /tmp/dbops-oracle-ci/agent.yaml >/tmp/dbops-oracle-ci/agent.log 2>&1 &
+          echo $! >/tmp/dbops-oracle-ci/agent.pid
+
+      - name: Verify Oracle capacity lifecycle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, sqlite3, time, urllib.error, urllib.request
+
+          base = "http://127.0.0.1:18083/api/v1"
+
+          def get(path):
+              with urllib.request.urlopen(base + path, timeout=5) as r:
+                  return json.load(r)["data"]
+
+          def post(path, body, expected=200):
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(body).encode(),
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=5) as r:
+                      status, payload = r.status, json.load(r)
+              except urllib.error.HTTPError as e:
+                  status, payload = e.code, json.loads(e.read().decode())
+              if status != expected:
+                  raise SystemExit(f"POST {path}: expected={expected} got={status} payload={payload}")
+              return payload.get("data")
+
+          def wait_task(task_id):
+              last = None
+              for _ in range(120):
+                  last = get(f"/tasks/{task_id}")
+                  if last["status"] in ("success", "failed", "timeout", "cancelled"):
+                      return last
+                  time.sleep(0.25)
+              raise SystemExit(f"task timeout: {last}")
+
+          agent_id = None
+          for _ in range(40):
+              try:
+                  agents = get("/agents")
+                  if agents and agents[0]["status"] == "online":
+                      agent_id = agents[0]["id"]
+                      break
+              except Exception:
+                  pass
+              time.sleep(0.25)
+          if not agent_id:
+              raise SystemExit("Oracle Agent did not register")
+
+          instance = post("/oracle/instances", {
+              "agent_id": agent_id,
+              "name": "ORCL-CI",
+              "port": 1521,
+              "oracle_home": "/tmp/dbops-oracle-ci/oracle",
+              "oracle_sid": "ORCL",
+              "service_name": "ORCL",
+              "username": "SYSTEM",
+              "password": "Oracle-ci-password-123",
+          }, expected=201)
+          if instance["db_type"] != "oracle" or instance["managed_mode"] != "imported":
+              raise SystemExit(f"Oracle onboarding invalid: {instance}")
+          instance_id = instance["id"]
+
+          status = get(f"/oracle/instances/{instance_id}/status")
+          if status["open_mode"] != "READ WRITE" or status["database_role"] != "PRIMARY":
+              raise SystemExit(f"Oracle status invalid: {status}")
+
+          spaces = get(f"/oracle/instances/{instance_id}/tablespaces")
+          if not spaces or spaces[0]["tablespace"] != "USERS":
+              raise SystemExit(f"tablespace query invalid: {spaces}")
+
+          files = get(f"/oracle/instances/{instance_id}/datafiles?tablespace=USERS")
+          if len(files) != 1:
+              raise SystemExit(f"initial datafiles invalid: {files}")
+
+          post(f"/oracle/instances/{instance_id}/datafiles", {
+              "tablespace": "USERS",
+              "file_path": "/tmp/dbops-oracle-ci/oradata/users02.dbf",
+              "size_mb": 64,
+              "autoextend": True,
+              "next_mb": 16,
+              "max_mb": 512,
+              "confirmed": False,
+          }, expected=400)
+
+          add_task = post(f"/oracle/instances/{instance_id}/datafiles", {
+              "tablespace": "USERS",
+              "file_path": "/tmp/dbops-oracle-ci/oradata/users02.dbf",
+              "size_mb": 64,
+              "autoextend": True,
+              "next_mb": 16,
+              "max_mb": 512,
+              "confirmed": True,
+          }, expected=202)
+          add_final = wait_task(add_task["id"])
+          if add_final["status"] != "success":
+              raise SystemExit(f"add datafile failed: {add_final}")
+
+          files = get(f"/oracle/instances/{instance_id}/datafiles?tablespace=USERS")
+          if len(files) != 2:
+              raise SystemExit(f"datafile add verification failed: {files}")
+
+          resize_task = post(f"/oracle/instances/{instance_id}/datafiles/resize", {
+              "file_path": "/tmp/dbops-oracle-ci/oradata/users02.dbf",
+              "target_size_mb": 128,
+              "confirmed": True,
+          }, expected=202)
+          resize_final = wait_task(resize_task["id"])
+          if resize_final["status"] != "success":
+              raise SystemExit(f"resize datafile failed: {resize_final}")
+
+          shrink_task = post(f"/oracle/instances/{instance_id}/datafiles/resize", {
+              "file_path": "/tmp/dbops-oracle-ci/oradata/users02.dbf",
+              "target_size_mb": 64,
+              "confirmed": True,
+          }, expected=202)
+          shrink_final = wait_task(shrink_task["id"])
+          if shrink_final["status"] != "failed" or "only permits datafile growth" not in (shrink_final.get("error_message") or ""):
+              raise SystemExit(f"datafile shrink guard failed: {shrink_final}")
+
+          db = sqlite3.connect("/tmp/dbops-oracle-ci/server/dbops.db")
+          row = db.execute("""
+              select c.encrypted_secret,c.credential_type,d.metadata_json
+              from database_instances d join credentials c on c.id=d.credential_id
+              where d.id=?
+          """, (instance_id,)).fetchone()
+          if not row or row[1] != "oracle_admin" or len(row[0]) < 40:
+              raise SystemExit(f"Oracle credential persistence invalid: {row}")
+          if "Oracle-ci-password-123" in row[0] or "Oracle-ci-password-123" in row[2]:
+              raise SystemExit("Oracle password leaked into metadata")
+
+          params = db.execute("select parameters_json from tasks where task_type like 'oracle.%'").fetchall()
+          if any("Oracle-ci-password-123" in x[0] for x in params):
+              raise SystemExit("Oracle password leaked into durable task parameters")
+
+          print("Oracle capacity end-to-end OK", {
+              "instance_id": instance_id,
+              "tablespaces": len(spaces),
+              "datafiles": len(files),
+              "add_task": add_task["id"],
+              "resize_task": resize_task["id"],
+          })
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          if test -f /tmp/dbops-oracle-ci/agent.pid; then kill "$(cat /tmp/dbops-oracle-ci/agent.pid)" 2>/dev/null || true; fi
+          if test -f /tmp/dbops-oracle-ci/server.pid; then kill "$(cat /tmp/dbops-oracle-ci/server.pid)" 2>/dev/null || true; fi
+          echo "--- server log ---"
+          cat /tmp/dbops-oracle-ci/server.log 2>/dev/null || true
+          echo "--- agent log ---"
+          cat /tmp/dbops-oracle-ci/agent.log 2>/dev/null || true
