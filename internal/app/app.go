@@ -83,6 +83,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	backupRepo := reposqlite.BackupJobRepo{DB: stores.Metadata}
 	archiveRepo := reposqlite.ArchiveJobRepo{DB: stores.Metadata}
 	metricsStore := metricstore.NewStore(stores.Metrics)
+	alertEngine := alert.New(logger, cfg.Alert.Enabled, cfg.Alert.EvaluateSeconds, stores.Metadata, metricsStore)
 
 	gateway := agentgateway.New(
 		agentRepo,
@@ -158,6 +159,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			dbRepo,
 			taskRepo,
 			metricsStore,
+			alertEngine,
 			softwareService,
 			mysqlInstaller,
 			mysqlBackup,
@@ -170,7 +172,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		tasks:     taskEngine,
 		gateway:   gateway,
 		scheduler: scheduler.New(logger, cfg.Scheduler.Enabled, cfg.Scheduler.ScanIntervalSeconds),
-		alert:     alert.New(logger, cfg.Alert.Enabled, cfg.Alert.EvaluateSeconds),
+		alert:     alertEngine,
 	}, nil
 }
 
