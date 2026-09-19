@@ -1,0 +1,200 @@
+name: Auth CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/auth/**'
+      - 'internal/httpapi/**'
+      - 'internal/config/**'
+      - 'internal/repository/**'
+      - 'internal/storage/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/auth-ci.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/auth/**'
+      - 'internal/httpapi/**'
+      - 'internal/config/**'
+      - 'internal/repository/**'
+      - 'internal/storage/**'
+      - 'go.mod'
+      - 'go.sum'
+
+jobs:
+  auth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+          cache: true
+
+      - name: Unit tests and build
+        run: |
+          go test ./internal/auth/... ./internal/repository/sqlite/...
+          go build -o /tmp/dbops-server ./cmd/dbops-server
+
+      - name: Start authenticated server
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/dbops-auth-ci
+          mkdir -p /tmp/dbops-auth-ci
+          cat >/tmp/dbops-auth-ci/server.yaml <<'EOF'
+          server:
+            listen: 127.0.0.1:18082
+            public_url: http://127.0.0.1:18082
+            data_dir: /tmp/dbops-auth-ci/data
+          storage:
+            metadata_db: /tmp/dbops-auth-ci/data/dbops.db
+            metrics_db: /tmp/dbops-auth-ci/data/metrics.db
+            software_dir: /tmp/dbops-auth-ci/data/software
+            task_work_dir: /tmp/dbops-auth-ci/data/task-work
+            log_dir: /tmp/dbops-auth-ci/data/logs
+            platform_backup_dir: /tmp/dbops-auth-ci/data/platform-backup
+          sqlite:
+            metadata_max_open_conns: 4
+            metrics_max_open_conns: 2
+          task:
+            workers: 1
+            scan_interval_seconds: 1
+            lease_seconds: 30
+          scheduler:
+            enabled: false
+          alert:
+            enabled: false
+          security:
+            master_key_env: DBOPS_MASTER_KEY
+            package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
+          auth:
+            enabled: true
+            jwt_secret_env: DBOPS_JWT_SECRET
+            access_minutes: 15
+            refresh_hours: 168
+            bootstrap_admin_username: admin
+            bootstrap_admin_password_env: DBOPS_ADMIN_PASSWORD
+          agent_gateway:
+            heartbeat_timeout_seconds: 10
+            websocket_path: /api/v1/agent/ws
+            bootstrap_token_env: DBOPS_AGENT_BOOTSTRAP_TOKEN
+            allow_insecure_registration: false
+          EOF
+
+          DBOPS_MASTER_KEY='auth-master-key-0123456789abcdef'           DBOPS_PACKAGE_SIGNING_KEY='auth-package-key-0123456789abcdef'           DBOPS_AGENT_BOOTSTRAP_TOKEN='auth-agent-bootstrap'           DBOPS_JWT_SECRET='auth-jwt-secret-0123456789abcdef0123456789'           DBOPS_ADMIN_PASSWORD='Admin-password-for-auth-ci-123'             /tmp/dbops-server --config /tmp/dbops-auth-ci/server.yaml >/tmp/dbops-auth-ci/server.log 2>&1 &
+          echo $! >/tmp/dbops-auth-ci/server.pid
+
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:18082/api/v1/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18082/api/v1/health >/dev/null
+
+      - name: Verify JWT and RBAC
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, urllib.error, urllib.request
+
+          base = "http://127.0.0.1:18082/api/v1"
+
+          def request(method, path, body=None, token=None, expected=200):
+              headers = {}
+              data = None
+              if body is not None:
+                  data = json.dumps(body).encode()
+                  headers["Content-Type"] = "application/json"
+              if token:
+                  headers["Authorization"] = "Bearer " + token
+              req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=5) as r:
+                      status = r.status
+                      payload = json.load(r)
+              except urllib.error.HTTPError as e:
+                  status = e.code
+                  payload = json.loads(e.read().decode())
+              if status != expected:
+                  raise SystemExit(f"{method} {path}: expected {expected}, got {status}: {payload}")
+              return payload.get("data"), payload
+
+          request("GET", "/hosts", expected=401)
+
+          admin, _ = request("POST", "/auth/login", {
+              "username": "admin",
+              "password": "Admin-password-for-auth-ci-123",
+          })
+          access = admin["access_token"]
+          refresh = admin["refresh_token"]
+
+          me, _ = request("GET", "/auth/me", token=access)
+          if me["username"] != "admin" or "SuperAdmin" not in me["roles"]:
+              raise SystemExit(f"unexpected admin identity: {me}")
+
+          viewer, _ = request("POST", "/users", {
+              "username": "viewer1",
+              "password": "Viewer-password-for-auth-ci-123",
+              "display_name": "CI Viewer",
+              "role": "Viewer",
+          }, token=access, expected=201)
+          if viewer["roles"] != ["Viewer"]:
+              raise SystemExit(f"unexpected viewer role: {viewer}")
+
+          viewer_pair, _ = request("POST", "/auth/login", {
+              "username": "viewer1",
+              "password": "Viewer-password-for-auth-ci-123",
+          })
+          viewer_access = viewer_pair["access_token"]
+          request("GET", "/hosts", token=viewer_access)
+          request("POST", "/hosts", {
+              "hostname": "should-not-create",
+              "ip_address": "127.0.0.9",
+          }, token=viewer_access, expected=403)
+
+          rotated, _ = request("POST", "/auth/refresh", {"refresh_token": refresh})
+          if rotated["refresh_token"] == refresh:
+              raise SystemExit("refresh token did not rotate")
+          request("POST", "/auth/refresh", {"refresh_token": refresh}, expected=401)
+
+          print("JWT/RBAC end-to-end OK", {
+              "admin": me["username"],
+              "viewer": viewer["username"],
+              "refresh_rotated": True,
+          })
+          PY
+
+      - name: Verify credential storage
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+
+          db = sqlite3.connect("/tmp/dbops-auth-ci/data/dbops.db")
+          cur = db.cursor()
+          users = cur.execute("select username,password_hash from users order by id").fetchall()
+          if len(users) != 2:
+              raise SystemExit(f"unexpected users: {users}")
+          for username, password_hash in users:
+              if not password_hash.startswith("$2"):
+                  raise SystemExit(f"{username} password is not bcrypt: {password_hash[:10]}")
+
+          rows = cur.execute("select token_hash,revoked_at from refresh_tokens").fetchall()
+          if len(rows) < 3:
+              raise SystemExit(f"expected rotated refresh facts: {rows}")
+          if any(len(row[0]) != 64 for row in rows):
+              raise SystemExit("refresh token hashes must be SHA-256")
+          if not any(row[1] is not None for row in rows):
+              raise SystemExit("consumed refresh token was not revoked")
+          print("auth persistence OK", {"users": len(users), "refresh_rows": len(rows)})
+          PY
+
+      - name: Cleanup
+        if: always()
+        run: |
+          if test -f /tmp/dbops-auth-ci/server.pid; then kill "$(cat /tmp/dbops-auth-ci/server.pid)" 2>/dev/null || true; fi
+          echo "--- auth server log ---"
+          cat /tmp/dbops-auth-ci/server.log 2>/dev/null || true
