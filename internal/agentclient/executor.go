@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aimdotsh/dbops/internal/actionpolicy"
 	"github.com/aimdotsh/dbops/internal/agentproto"
 	"gopkg.in/yaml.v3"
 )
@@ -49,6 +50,13 @@ func (e *Executor) Execute(parent context.Context, req agentproto.ActionRequest)
 	if !ok {
 		return nil, fmt.Errorf("action %q is not allowed", req.Action)
 	}
+	policy, err := actionpolicy.Validate(req.Action, req.Confirmed)
+	if err != nil {
+		return nil, err
+	}
+	if req.Risk != "" && req.Risk != string(policy.Risk) {
+		return nil, fmt.Errorf("action risk mismatch: request=%s policy=%s", req.Risk, policy.Risk)
+	}
 
 	timeout := req.TimeoutSeconds
 	if timeout <= 0 || (spec.Timeout > 0 && timeout > spec.Timeout) {
@@ -69,6 +77,10 @@ func (e *Executor) Execute(parent context.Context, req agentproto.ActionRequest)
 		return portCheck(ctx, req.Params)
 	case "host.directory.check":
 		return directoryCheck(ctx, req.Params)
+	case "mysql.precheck":
+		return mysqlPrecheck(ctx, req.Params)
+	case "mysql.install":
+		return mysqlInstallPlan(req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
@@ -242,4 +254,49 @@ func uint64Param(params map[string]any, key string) (uint64, error) {
 	default:
 		return 0, fmt.Errorf("%s must be a number", key)
 	}
+}
+
+
+func mysqlInstallPlan(params map[string]any) (map[string]any, error) {
+	execute, _ := params["execute"].(bool)
+	if execute {
+		return nil, fmt.Errorf("mysql.install execution is not enabled until software package repository, SHA256 verification, systemd installation and rollback markers are configured")
+	}
+	port, err := intParamDefault(params, "port", 3306)
+	if err != nil || port < 1 || port > 65535 {
+		return nil, fmt.Errorf("invalid port")
+	}
+	dataDir, _ := params["data_dir"].(string)
+	if dataDir == "" {
+		return nil, fmt.Errorf("data_dir is required")
+	}
+	return map[string]any{
+		"mode": "plan_only",
+		"risk": "R2",
+		"port": port,
+		"data_dir": dataDir,
+		"steps": []string{
+			"CHECK_AGENT",
+			"CHECK_OS_ARCH",
+			"CHECK_PORT",
+			"CHECK_DATADIR",
+			"CHECK_DISK",
+			"ALLOCATE_SERVER_ID",
+			"DOWNLOAD_PACKAGE",
+			"VERIFY_SHA256",
+			"CREATE_MYSQL_USER",
+			"CREATE_DIRECTORIES",
+			"INSTALL_PACKAGE",
+			"RENDER_CONFIG",
+			"VALIDATE_CONFIG",
+			"INITIALIZE_DATABASE",
+			"INSTALL_SYSTEMD",
+			"START_DATABASE",
+			"VERIFY_DATABASE",
+			"INITIALIZE_ACCOUNTS",
+			"REGISTER_INSTANCE",
+			"ENABLE_METRICS",
+			"FINAL_VERIFY",
+		},
+	}, nil
 }
