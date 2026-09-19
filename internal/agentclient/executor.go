@@ -111,6 +111,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlArchivePrecheck(ctx, e.workDir, req.Params)
 	case "mysql.archive.start":
 		return mysqlArchiveStart(ctx, e.workDir, req.Params)
+	case "mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop":
+		return mysqlArchiveControl(e.workDir, req.Action, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
