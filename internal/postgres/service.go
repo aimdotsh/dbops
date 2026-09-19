@@ -136,7 +136,7 @@ func (s *Service) Onboard(ctx context.Context, req OnboardRequest) (domain.Datab
 	}
 	raw, _ := json.Marshal(metadata{BinDir: req.BinDir, Host: req.Host, Database: req.Database})
 	instance, err := s.dbs.CreateImported(ctx, domain.DatabaseInstance{
-		Name: req.Name, DBType: "postgres", Version: version, HostID: *agent.HostID,
+		Name: req.Name, DBType: "postgresql", Version: version, HostID: *agent.HostID,
 		Port: req.Port, Role: role, CredentialID: &cred.ID, Status: "online",
 		ManagedMode: "imported", MetadataJSON: string(raw),
 	})
@@ -287,7 +287,7 @@ func (s *Service) loadRuntime(ctx context.Context, instanceID int64) (runtime, e
 	if err != nil {
 		return runtime{}, err
 	}
-	if inst.DBType != "postgres" || inst.CredentialID == nil {
+	if inst.DBType != "postgresql" || inst.CredentialID == nil {
 		return runtime{}, errors.New("instance is not a managed PostgreSQL database")
 	}
 	agent, err := s.agents.GetByHostID(ctx, inst.HostID)
