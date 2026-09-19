@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/aimdotsh/dbops/internal/actionpolicy"
 	"github.com/aimdotsh/dbops/internal/agentproto"
