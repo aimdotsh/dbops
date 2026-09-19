@@ -160,25 +160,6 @@ type BackupJob struct {
 	ErrorMessage       string     `json:"error_message,omitempty"`
 }
 
-type ArchiveJob struct {
-	ID                  int64      `json:"id"`
-	TaskID              int64      `json:"task_id"`
-	SourceInstanceID    int64      `json:"source_instance_id"`
-	SourceDatabase      string     `json:"source_database"`
-	SourceTable         string     `json:"source_table"`
-	DestinationDatabase string     `json:"destination_database,omitempty"`
-	DestinationTable    string     `json:"destination_table,omitempty"`
-	Status              string     `json:"status"`
-	ScannedRows         int64      `json:"scanned_rows"`
-	ArchivedRows        int64      `json:"archived_rows"`
-	DeletedRows         int64      `json:"deleted_rows"`
-	FailedRows          int64      `json:"failed_rows"`
-	StartedAt           *time.Time `json:"started_at,omitempty"`
-	FinishedAt          *time.Time `json:"finished_at,omitempty"`
-	VerificationStatus  string     `json:"verification_status,omitempty"`
-	ErrorMessage        string     `json:"error_message,omitempty"`
-}
-
 
 type ArchivePolicy struct {
 	ID                    int64     `json:"id"`
