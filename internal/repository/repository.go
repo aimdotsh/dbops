@@ -66,6 +66,15 @@ type BackupJobRepository interface {
 	MarkFailed(context.Context, int64, string) error
 }
 
+type ArchiveJobRepository interface {
+	Create(context.Context, domain.ArchiveJob) (domain.ArchiveJob, error)
+	Get(context.Context, int64) (domain.ArchiveJob, error)
+	List(context.Context, int64) ([]domain.ArchiveJob, error)
+	MarkRunning(context.Context, int64) error
+	MarkSuccess(context.Context, int64, int64, int64, int64, int64, string) error
+	MarkFailed(context.Context, int64, string) error
+}
+
 type TaskRepository interface {
 	Create(context.Context, domain.Task) (domain.Task, error)
 	Get(context.Context, int64) (domain.Task, error)
