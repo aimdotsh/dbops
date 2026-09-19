@@ -255,7 +255,7 @@ func (s *Service) BackupHandler() func(context.Context, domain.Task) (any, error
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 3, StepCode: "PG_BACKUP_VERIFY", StepName: "Verify PostgreSQL backup",
 			Status: "success", Progress: 100,
-			OutputJSON: fmt.Sprintf("{\"backup_job_id\":%d,\"sha256\":%q,\"size_bytes\":%d}", job.ID, checksum, size),
+			OutputJSON:     fmt.Sprintf("{\"backup_job_id\":%d,\"sha256\":%q,\"size_bytes\":%d}", job.ID, checksum, size),
 			RecoveryPolicy: "verify_before_retry",
 		})
 		return map[string]any{

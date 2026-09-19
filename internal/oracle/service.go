@@ -276,7 +276,7 @@ func (s *Service) RMANBackupHandler() func(context.Context, domain.Task) (any, e
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 3, StepCode: "RMAN_VERIFY", StepName: "Verify RMAN backup pieces",
 			Status: "success", Progress: 100,
-			OutputJSON: fmt.Sprintf("{\"backup_job_id\":%d,\"piece_count\":%d,\"manifest_sha256\":%q}", job.ID, pieceCount, checksum),
+			OutputJSON:     fmt.Sprintf("{\"backup_job_id\":%d,\"piece_count\":%d,\"manifest_sha256\":%q}", job.ID, pieceCount, checksum),
 			RecoveryPolicy: "verify_before_retry",
 		})
 		return map[string]any{
