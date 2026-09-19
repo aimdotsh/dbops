@@ -19,7 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 type Client struct {
 	cfg      Config
@@ -176,36 +176,62 @@ func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req 
 	c.running.Add(1)
 	defer c.running.Add(-1)
 
-	step := agentproto.Step{Code: strings.ToUpper(strings.ReplaceAll(req.Action, ".", "_")), Name: req.Action}
-	_ = c.writeEnvelope(conn, "action_response", agentproto.ActionResponse{
-		RequestID: req.RequestID,
-		TaskID:    req.TaskID,
-		Status:    "running",
-		Progress:  10,
-		Step:      step,
-		Message:   "action started",
-	})
+	defaultStep := agentproto.Step{
+		No: 1,
+		Code: strings.ToUpper(strings.ReplaceAll(req.Action, ".", "_")),
+		Name: req.Action,
+		Status: "running",
+	}
+	if req.Action != "mysql.install" {
+		_ = c.writeEnvelope(conn, "action_response", agentproto.ActionResponse{
+			RequestID: req.RequestID,
+			TaskID:    req.TaskID,
+			Status:    "running",
+			Progress:  10,
+			Step:      defaultStep,
+			Message:   "action started",
+		})
+	}
 
-	result, err := c.executor.Execute(parent, req)
+	reporter := func(resp agentproto.ActionResponse) {
+		resp.RequestID = req.RequestID
+		resp.TaskID = req.TaskID
+		if resp.Status == "" {
+			resp.Status = "running"
+		}
+		_ = c.writeEnvelope(conn, "action_response", resp)
+	}
+
+	result, err := c.executor.ExecuteWithReporter(parent, req, reporter)
 	if err != nil {
+		if req.Action == "mysql.install" {
+			defaultStep = agentproto.Step{No: 18, Code: "INITIALIZE_ACCOUNTS", Name: "Initialize accounts", Status: "failed"}
+		} else {
+			defaultStep.Status = "failed"
+		}
 		_ = c.writeEnvelope(conn, "action_response", agentproto.ActionResponse{
 			RequestID: req.RequestID,
 			TaskID:    req.TaskID,
 			Status:    "failed",
 			Progress:  100,
-			Step:      step,
+			Step:      defaultStep,
 			Message:   "action failed",
 			Error:     err.Error(),
 		})
 		return
 	}
 
+	if req.Action == "mysql.install" {
+		defaultStep = agentproto.Step{No: 18, Code: "INITIALIZE_ACCOUNTS", Name: "Initialize accounts", Status: "success"}
+	} else {
+		defaultStep.Status = "success"
+	}
 	_ = c.writeEnvelope(conn, "action_response", agentproto.ActionResponse{
 		RequestID: req.RequestID,
 		TaskID:    req.TaskID,
 		Status:    "success",
 		Progress:  100,
-		Step:      step,
+		Step:      defaultStep,
 		Message:   "action completed",
 		Result:    result,
 	})
