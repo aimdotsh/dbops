@@ -169,10 +169,20 @@ jobs:
           sys.exit(0)
           '''
 
+          mysqldump = r'''#!/usr/bin/env python3
+          import sys
+          print("-- fake mysqldump for dbops CI")
+          print("CREATE DATABASE IF NOT EXISTS dbops_ci;")
+          print("CREATE TABLE dbops_ci.t(id INT PRIMARY KEY);")
+          print("INSERT INTO dbops_ci.t VALUES (1);")
+          sys.exit(0)
+          '''
+
           for name, content in {
               "mysqld": mysqld,
               "mysql": mysql,
               "mysqladmin": mysqladmin,
+              "mysqldump": mysqldump,
           }.items():
               path = os.path.join(root, name)
               with open(path, "w") as f:
@@ -329,6 +339,54 @@ jobs:
               "instance_id": matches[0]["id"],
               "steps": len(steps),
           })
+
+          instance_id = matches[0]["id"]
+          backup_body = {
+              "all_databases": True,
+              "output_dir": "/tmp/dbops-mysql-ci/backups",
+              "file_name": "ci-full.sql.gz",
+          }
+          req = urllib.request.Request(
+              base + f"/mysql/instances/{instance_id}/backups",
+              data=json.dumps(backup_body).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(req, timeout=5) as r:
+              backup_task = json.load(r)["data"]
+          backup_task_id = backup_task["id"]
+
+          backup_final = None
+          for _ in range(120):
+              with urllib.request.urlopen(base + f"/tasks/{backup_task_id}", timeout=5) as r:
+                  backup_final = json.load(r)["data"]
+              if backup_final["status"] in ("success", "failed", "timeout", "cancelled"):
+                  break
+              time.sleep(0.5)
+          if not backup_final or backup_final["status"] != "success":
+              raise SystemExit(f"mysql.backup failed: {backup_final}")
+
+          with urllib.request.urlopen(base + f"/tasks/{backup_task_id}/steps", timeout=5) as r:
+              backup_steps = json.load(r)["data"]
+          if len(backup_steps) != 4 or any(s["status"] != "success" for s in backup_steps):
+              raise SystemExit(f"backup steps invalid: {backup_steps}")
+
+          with urllib.request.urlopen(base + f"/mysql/backups?instance_id={instance_id}", timeout=5) as r:
+              backups = json.load(r)["data"]
+          if len(backups) != 1 or backups[0]["status"] != "success":
+              raise SystemExit(f"backup job registration failed: {backups}")
+          if len(backups[0].get("checksum", "")) != 64 or backups[0].get("size_bytes", 0) <= 0:
+              raise SystemExit(f"backup checksum/size invalid: {backups[0]}")
+          if not os.path.exists(backups[0]["storage_path"]):
+              raise SystemExit(f"backup file missing: {backups[0]['storage_path']}")
+
+          open("/tmp/backup-task-id", "w").write(str(backup_task_id))
+          print("mysql.backup end-to-end OK", {
+              "task_id": backup_task_id,
+              "backup_job_id": backups[0]["id"],
+              "size_bytes": backups[0]["size_bytes"],
+              "sha256": backups[0]["checksum"],
+          })
           PY
 
           python3 - <<'PY'
@@ -355,6 +413,15 @@ jobs:
               raise SystemExit(f"software package metadata invalid: {pkg}")
 
           print("SQLite install facts OK", {"server_id": sid[0], "credential_ciphertext_len": len(cred[0])})
+
+          backup_task_id = int(open("/tmp/backup-task-id").read())
+          backup_params = cur.execute("select parameters_json from tasks where id=?", (backup_task_id,)).fetchone()[0]
+          if "root_password" in backup_params:
+              raise SystemExit("root password leaked into backup task parameters")
+          backup_row = cur.execute("select status,size_bytes,checksum,storage_path from backup_jobs where task_id=?", (backup_task_id,)).fetchone()
+          if not backup_row or backup_row[0] != "success" or backup_row[1] <= 0 or len(backup_row[2]) != 64:
+              raise SystemExit(f"backup job facts invalid: {backup_row}")
+          print("SQLite backup facts OK", backup_row[:3])
           PY
 
           test -s /tmp/dbops-mysql-ci/data/auto.cnf
