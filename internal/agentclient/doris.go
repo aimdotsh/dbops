@@ -13,6 +13,10 @@ import (
 )
 
 func dorisClusterStatus(ctx context.Context, workDir string, params map[string]any) (map[string]any, error) {
+	version, err := runDorisSQL(ctx, workDir, params, "SELECT VERSION()", false)
+	if err != nil {
+		return nil, err
+	}
 	frontends, err := runDorisTable(ctx, workDir, params, "SHOW FRONTENDS")
 	if err != nil {
 		return nil, err
@@ -25,6 +29,7 @@ func dorisClusterStatus(ctx context.Context, workDir string, params map[string]a
 	loadJobs, _ := runDorisTable(ctx, workDir, params, "SHOW LOAD")
 
 	return map[string]any{
+		"version": strings.TrimSpace(version),
 		"frontends": frontends,
 		"backends": backends,
 		"tablet_health": tabletHealth,
