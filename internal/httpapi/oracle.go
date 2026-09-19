@@ -34,6 +34,37 @@ func (s *Server) oracleStatus(c *gin.Context) {
 	ok(c, out)
 }
 
+func (s *Server) oracleDataGuardStatus(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	out, err := s.oracle.DataGuardStatus(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "ORACLE_DATAGUARD_STATUS_FAILED", "message": err.Error()})
+		return
+	}
+	ok(c, out)
+}
+
+func (s *Server) createOracleRMANBackup(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	var body oraclesvc.RMANBackupRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
+		return
+	}
+	task, err := s.oracle.CreateRMANBackupTask(c.Request.Context(), id, body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "ORACLE_RMAN_BACKUP_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
+}
+
 func (s *Server) oracleTablespaces(c *gin.Context) {
 	id, okID := parseID(c)
 	if !okID {
