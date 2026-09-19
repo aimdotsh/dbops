@@ -58,6 +58,11 @@ func (r AgentRepo) GetByUUID(ctx context.Context, uuid string) (domain.Agent, er
 		"SELECT id,agent_uuid,host_id,COALESCE(version,''),COALESCE(architecture,''),status,last_heartbeat_at,capabilities_json FROM agents WHERE agent_uuid=?", uuid))
 }
 
+func (r AgentRepo) GetByHostID(ctx context.Context, hostID int64) (domain.Agent, error) {
+	return scanAgent(r.DB.QueryRowContext(ctx,
+		"SELECT id,agent_uuid,host_id,COALESCE(version,''),COALESCE(architecture,''),status,last_heartbeat_at,capabilities_json FROM agents WHERE host_id=?", hostID))
+}
+
 func (r AgentRepo) List(ctx context.Context) ([]domain.Agent, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		"SELECT id,agent_uuid,host_id,COALESCE(version,''),COALESCE(architecture,''),status,last_heartbeat_at,capabilities_json FROM agents ORDER BY id DESC")
