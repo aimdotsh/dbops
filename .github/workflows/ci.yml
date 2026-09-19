@@ -250,6 +250,29 @@ jobs:
               time.sleep(1)
           if not agent_id:
               raise SystemExit("agent did not securely register")
+          host_id = agents[0].get("host_id")
+          if not host_id:
+              raise SystemExit(f"agent has no bound host: {agents[0]}")
+
+          metric = None
+          for _ in range(30):
+              try:
+                  metric = get(f"/metrics/latest?resource_type=host&resource_id={host_id}")
+                  if "memory_used_pct" in metric.get("payload", {}):
+                      break
+              except Exception:
+                  pass
+              time.sleep(1)
+          if not metric or "memory_used_pct" not in metric.get("payload", {}):
+              raise SystemExit(f"host metrics were not persisted: {metric}")
+          metric_range = get(f"/metrics/range?resource_type=host&resource_id={host_id}&granularity=5m")
+          if not metric_range:
+              raise SystemExit("5m metric range is empty")
+          print("embedded host metrics OK", {
+              "host_id": host_id,
+              "memory_used_pct": metric["payload"].get("memory_used_pct"),
+              "root_used_pct": metric["payload"].get("root_used_pct"),
+          })
 
           credential = "/tmp/dbops-agent-ci/agent.credential"
           for _ in range(20):
