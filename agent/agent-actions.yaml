@@ -76,6 +76,9 @@ actions:
   - name: mysql.archive.stop
     timeout: 60
     risk: R3
+  - name: oracle.dataguard.status
+    timeout: 60
+    risk: R0
   - name: oracle.status
     timeout: 60
     risk: R0
