@@ -18,6 +18,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	"github.com/aimdotsh/dbops/internal/mysqlservice"
+	oraclesvc "github.com/aimdotsh/dbops/internal/oracle"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
 	"github.com/aimdotsh/dbops/internal/security"
@@ -151,6 +152,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlService := mysqlservice.New(agentRepo, dbRepo, taskRepo, gateway)
+	oracleService := oraclesvc.New(agentRepo, dbRepo, credentialRepo, taskRepo, cipher, gateway)
 
 	taskEngine := task.New(
 		taskRepo,
@@ -169,6 +171,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("mysql.archive.control", mysqlArchive.ControlHandler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
 	taskEngine.Register("mysql.service", mysqlService.Handler())
+	taskEngine.Register("oracle.datafile.add", oracleService.AddHandler())
+	taskEngine.Register("oracle.datafile.resize", oracleService.ResizeHandler())
 
 	return &App{
 		cfg:    cfg,
@@ -189,6 +193,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			mysqlArchive,
 			mysqlReplication,
 			mysqlService,
+			oracleService,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
