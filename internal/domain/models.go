@@ -89,6 +89,7 @@ type Task struct {
 	ParametersJSON string     `json:"parameters_json"`
 	ResultJSON     string     `json:"result_json"`
 	AgentID        *int64     `json:"agent_id,omitempty"`
+	IdempotencyKey *string    `json:"idempotency_key,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	QueuedAt       *time.Time `json:"queued_at,omitempty"`
 	StartedAt      *time.Time `json:"started_at,omitempty"`
