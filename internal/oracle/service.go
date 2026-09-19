@@ -23,6 +23,7 @@ type Service struct {
 	agents      repository.AgentRepository
 	dbs         repository.DatabaseRepository
 	credentials repository.CredentialRepository
+	backups     repository.BackupJobRepository
 	tasks       repository.TaskRepository
 	cipher      *security.Cipher
 	dispatcher  AgentDispatcher
@@ -55,6 +56,11 @@ type ResizeDatafileRequest struct {
 	Confirmed    bool   `json:"confirmed"`
 }
 
+type RMANBackupRequest struct {
+	BackupType string `json:"backup_type"`
+	OutputDir  string `json:"output_dir"`
+}
+
 type instanceMetadata struct {
 	OracleHome  string `json:"oracle_home"`
 	OracleSID   string `json:"oracle_sid"`
@@ -73,12 +79,13 @@ func New(
 	agents repository.AgentRepository,
 	dbs repository.DatabaseRepository,
 	credentials repository.CredentialRepository,
+	backups repository.BackupJobRepository,
 	tasks repository.TaskRepository,
 	cipher *security.Cipher,
 	dispatcher AgentDispatcher,
 ) *Service {
 	return &Service{
-		agents: agents, dbs: dbs, credentials: credentials,
+		agents: agents, dbs: dbs, credentials: credentials, backups: backups,
 		tasks: tasks, cipher: cipher, dispatcher: dispatcher,
 	}
 }
@@ -163,6 +170,136 @@ func (s *Service) Status(ctx context.Context, instanceID int64) (map[string]any,
 		return nil, err
 	}
 	return s.dispatchRead(ctx, rt, "oracle.status", nil)
+}
+
+func (s *Service) DataGuardStatus(ctx context.Context, instanceID int64) (map[string]any, error) {
+	rt, err := s.loadRuntime(ctx, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.dispatchRead(ctx, rt, "oracle.dataguard.status", nil)
+}
+
+func (s *Service) CreateRMANBackupTask(ctx context.Context, instanceID int64, req RMANBackupRequest) (domain.Task, error) {
+	switch req.BackupType {
+	case "full", "level0", "level1", "archivelog":
+	default:
+		return domain.Task{}, errors.New("backup_type must be full, level0, level1 or archivelog")
+	}
+	if req.OutputDir == "" || !filepath.IsAbs(req.OutputDir) || filepath.Clean(req.OutputDir) == "/" {
+		return domain.Task{}, errors.New("output_dir must be an absolute non-root path")
+	}
+	if strings.ContainsAny(req.OutputDir, "'\"\r\n\x00") {
+		return domain.Task{}, errors.New("output_dir contains forbidden characters")
+	}
+	rt, err := s.loadRuntime(ctx, instanceID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	raw, _ := json.Marshal(req)
+	target := instanceID
+	agentID := rt.Agent.ID
+	key := fmt.Sprintf("oracle.rman.backup:%d:%s", instanceID, req.BackupType)
+	return s.tasks.Create(ctx, domain.Task{
+		TaskType: "oracle.rman.backup", TargetType: "database", TargetID: &target,
+		AgentID: &agentID, ParametersJSON: string(raw), IdempotencyKey: &key,
+	})
+}
+
+func (s *Service) RMANBackupHandler() func(context.Context, domain.Task) (any, error) {
+	return func(ctx context.Context, t domain.Task) (any, error) {
+		if t.TargetID == nil {
+			return nil, errors.New("Oracle RMAN task target is missing")
+		}
+		var req RMANBackupRequest
+		if err := json.Unmarshal([]byte(t.ParametersJSON), &req); err != nil {
+			return nil, err
+		}
+		rt, err := s.loadRuntime(ctx, *t.TargetID)
+		if err != nil {
+			return nil, err
+		}
+		job, err := s.backups.Create(ctx, domain.BackupJob{
+			TaskID: t.ID, DatabaseInstanceID: *t.TargetID,
+			BackupEngine: "rman", BackupType: req.BackupType, Status: "pending",
+		})
+		if err != nil {
+			return nil, err
+		}
+		_ = s.backups.MarkRunning(ctx, job.ID)
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 1, StepCode: "RMAN_PRECHECK", StepName: "Validate RMAN request",
+			Status: "success", Progress: 10, OutputJSON: fmt.Sprintf("{\"backup_type\":%q}", req.BackupType),
+			RecoveryPolicy: "verify_before_retry",
+		})
+
+		policy, _ := actionpolicy.Get("oracle.rman.backup")
+		resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{
+			TaskID: 0, Action: "oracle.rman.backup", Risk: string(policy.Risk),
+			ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400,
+			Params: s.params(rt, map[string]any{
+				"backup_type": req.BackupType, "output_dir": req.OutputDir,
+			}),
+		})
+		if err != nil {
+			_ = s.backups.MarkFailed(ctx, job.ID, err.Error())
+			_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+				TaskID: t.ID, StepNo: 2, StepCode: "RMAN_BACKUP", StepName: "Run RMAN backup",
+				Status: "failed", Progress: 70, ErrorMessage: err.Error(), RecoveryPolicy: "manual_on_unknown",
+			})
+			return nil, err
+		}
+		result, ok := resp.Result.(map[string]any)
+		if !ok {
+			err := errors.New("invalid RMAN backup response")
+			_ = s.backups.MarkFailed(ctx, job.ID, err.Error())
+			return nil, err
+		}
+		size := oracleNumber(result["size_bytes"])
+		checksum, _ := result["manifest_sha256"].(string)
+		outputDir, _ := result["output_dir"].(string)
+		pieceCount := oracleNumber(result["piece_count"])
+		if size <= 0 || len(checksum) != 64 || outputDir == "" || pieceCount <= 0 {
+			err := fmt.Errorf("RMAN backup verification failed: size=%d checksum_len=%d pieces=%d", size, len(checksum), pieceCount)
+			_ = s.backups.MarkFailed(ctx, job.ID, err.Error())
+			return nil, err
+		}
+		payload, _ := json.Marshal(result)
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 2, StepCode: "RMAN_BACKUP", StepName: "Run RMAN backup",
+			Status: "success", Progress: 85, OutputJSON: security.RedactJSON(string(payload)),
+			RecoveryPolicy: "manual_on_unknown",
+		})
+		if err := s.backups.MarkSuccess(ctx, job.ID, size, outputDir, checksum, string(payload)); err != nil {
+			return nil, err
+		}
+		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
+			TaskID: t.ID, StepNo: 3, StepCode: "RMAN_VERIFY", StepName: "Verify RMAN backup pieces",
+			Status: "success", Progress: 100,
+			OutputJSON: fmt.Sprintf("{\"backup_job_id\":%d,\"piece_count\":%d,\"manifest_sha256\":%q}", job.ID, pieceCount, checksum),
+			RecoveryPolicy: "verify_before_retry",
+		})
+		return map[string]any{
+			"backup_job_id": job.ID, "engine": "rman", "backup_type": req.BackupType,
+			"output_dir": outputDir, "size_bytes": size, "piece_count": pieceCount,
+			"manifest_sha256": checksum, "status": "success",
+		}, nil
+	}
+}
+
+func oracleNumber(v any) int64 {
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	case json.Number:
+		n, _ := x.Int64()
+		return n
+	}
+	return 0
 }
 
 func (s *Service) Tablespaces(ctx context.Context, instanceID int64) ([]map[string]any, error) {
