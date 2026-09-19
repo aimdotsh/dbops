@@ -8,43 +8,39 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type mysqlArchiveRequest struct {
-	SourceDatabase      string `json:"source_database"`
-	SourceTable         string `json:"source_table"`
-	DestinationDatabase string `json:"destination_database,omitempty"`
-	DestinationTable    string `json:"destination_table,omitempty"`
-	Where               string `json:"where"`
-	PTArchiverPath      string `json:"pt_archiver_path"`
-	BatchSize           int    `json:"batch_size,omitempty"`
-	TxnSize             int    `json:"txn_size,omitempty"`
-	SleepMS             int    `json:"sleep_ms,omitempty"`
-	DeleteSource        bool   `json:"delete_source"`
-	Confirmed           bool   `json:"confirmed"`
+type archiveStartRequest struct {
+	Confirmed bool `json:"confirmed"`
 }
 
-func (s *Server) precheckMySQLArchive(c *gin.Context) {
-	id, okID := parseID(c)
-	if !okID {
-		return
-	}
-	var body mysqlArchiveRequest
+func (s *Server) createMySQLArchivePolicy(c *gin.Context) {
+	var body mysqlarchive.PolicyRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
 		return
 	}
-	out, err := s.mysqlArchive.Precheck(c.Request.Context(), mysqlarchive.Request{
-		InstanceID:          id,
-		SourceDatabase:      body.SourceDatabase,
-		SourceTable:         body.SourceTable,
-		DestinationDatabase: body.DestinationDatabase,
-		DestinationTable:    body.DestinationTable,
-		Where:               body.Where,
-		PTArchiverPath:      body.PTArchiverPath,
-		BatchSize:           body.BatchSize,
-		TxnSize:             body.TxnSize,
-		SleepMS:             body.SleepMS,
-		DeleteSource:        body.DeleteSource,
-	})
+	out, err := s.mysqlArchive.CreatePolicy(c.Request.Context(), body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_POLICY_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"code": "OK", "message": "created", "data": out})
+}
+
+func (s *Server) listMySQLArchivePolicies(c *gin.Context) {
+	items, err := s.mysqlArchive.ListPolicies(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	ok(c, items)
+}
+
+func (s *Server) precheckMySQLArchivePolicy(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	out, err := s.mysqlArchive.PrecheckPolicy(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_PRECHECK_FAILED", "message": err.Error()})
 		return
@@ -52,51 +48,71 @@ func (s *Server) precheckMySQLArchive(c *gin.Context) {
 	ok(c, out)
 }
 
-func (s *Server) createMySQLArchive(c *gin.Context) {
+func (s *Server) startMySQLArchivePolicy(c *gin.Context) {
 	id, okID := parseID(c)
 	if !okID {
 		return
 	}
-	var body mysqlArchiveRequest
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
-		return
-	}
-	task, err := s.mysqlArchive.CreateTask(c.Request.Context(), mysqlarchive.Request{
-		InstanceID:          id,
-		SourceDatabase:      body.SourceDatabase,
-		SourceTable:         body.SourceTable,
-		DestinationDatabase: body.DestinationDatabase,
-		DestinationTable:    body.DestinationTable,
-		Where:               body.Where,
-		PTArchiverPath:      body.PTArchiverPath,
-		BatchSize:           body.BatchSize,
-		TxnSize:             body.TxnSize,
-		SleepMS:             body.SleepMS,
-		DeleteSource:        body.DeleteSource,
-		Confirmed:           body.Confirmed,
-	})
+	var body archiveStartRequest
+	_ = c.ShouldBindJSON(&body)
+	task, err := s.mysqlArchive.Start(c.Request.Context(), id, body.Confirmed)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_REJECTED", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_START_REJECTED", "message": err.Error()})
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
 }
 
 func (s *Server) listMySQLArchiveJobs(c *gin.Context) {
-	instanceID := int64(0)
-	if raw := c.Query("instance_id"); raw != "" {
+	policyID := int64(0)
+	if raw := c.Query("policy_id"); raw != "" {
 		v, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || v <= 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": "invalid instance_id"})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": "invalid policy_id"})
 			return
 		}
-		instanceID = v
+		policyID = v
 	}
-	items, err := s.mysqlArchive.List(c.Request.Context(), instanceID)
+	items, err := s.mysqlArchive.ListJobs(c.Request.Context(), policyID)
 	if err != nil {
 		fail(c, err)
 		return
 	}
 	ok(c, items)
+}
+
+func (s *Server) pauseMySQLArchiveJob(c *gin.Context) {
+	s.controlMySQLArchiveJob(c, "mysql.archive.pause")
+}
+
+func (s *Server) stopMySQLArchiveJob(c *gin.Context) {
+	s.controlMySQLArchiveJob(c, "mysql.archive.stop")
+}
+
+func (s *Server) resumeMySQLArchiveJob(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	task, err := s.mysqlArchive.Resume(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_RESUME_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
+}
+
+func (s *Server) controlMySQLArchiveJob(c *gin.Context, action string) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	var body archiveStartRequest
+	_ = c.ShouldBindJSON(&body)
+	task, err := s.mysqlArchive.Control(c.Request.Context(), id, action, body.Confirmed)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_CONTROL_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
 }
