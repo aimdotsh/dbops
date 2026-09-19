@@ -23,8 +23,8 @@ func (r TaskRepo) Create(ctx context.Context, t domain.Task) (domain.Task, error
 	if t.ParametersJSON == "" {
 		t.ParametersJSON = "{}"
 	}
-	res, err := r.DB.ExecContext(ctx, "INSERT INTO tasks(task_no,task_type,target_type,target_id,status,progress,parameters_json,result_json,agent_id,created_at,queued_at,timeout_seconds,recovery_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		t.TaskNo, t.TaskType, nullString(t.TargetType), t.TargetID, "queued", 0, t.ParametersJSON, "{}", t.AgentID, now, now, 3600, "verify_before_retry")
+	res, err := r.DB.ExecContext(ctx, "INSERT INTO tasks(task_no,task_type,target_type,target_id,status,progress,parameters_json,result_json,agent_id,idempotency_key,created_at,queued_at,timeout_seconds,recovery_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+		t.TaskNo, t.TaskType, nullString(t.TargetType), t.TargetID, "queued", 0, t.ParametersJSON, "{}", t.AgentID, t.IdempotencyKey, now, now, 3600, "verify_before_retry")
 	if err != nil {
 		return t, err
 	}
@@ -122,7 +122,7 @@ func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-const taskSelect = "SELECT id,task_no,task_type,COALESCE(target_type,''),target_id,status,progress,parameters_json,result_json,agent_id,created_at,queued_at,started_at,finished_at,lease_owner,lease_expires_at,error_code,error_message FROM tasks"
+const taskSelect = "SELECT id,task_no,task_type,COALESCE(target_type,''),target_id,status,progress,parameters_json,result_json,agent_id,idempotency_key,created_at,queued_at,started_at,finished_at,lease_owner,lease_expires_at,error_code,error_message FROM tasks"
 
 type scanner interface{ Scan(...any) error }
 
@@ -130,8 +130,8 @@ func scanTask(s scanner) (domain.Task, error) {
 	var t domain.Task
 	var created string
 	var queued, started, finished, leaseExp sql.NullString
-	var leaseOwner, errCode, errMsg sql.NullString
-	err := s.Scan(&t.ID, &t.TaskNo, &t.TaskType, &t.TargetType, &t.TargetID, &t.Status, &t.Progress, &t.ParametersJSON, &t.ResultJSON, &t.AgentID,
+	var leaseOwner, errCode, errMsg, idempotencyKey sql.NullString
+	err := s.Scan(&t.ID, &t.TaskNo, &t.TaskType, &t.TargetType, &t.TargetID, &t.Status, &t.Progress, &t.ParametersJSON, &t.ResultJSON, &t.AgentID, &idempotencyKey,
 		&created, &queued, &started, &finished, &leaseOwner, &leaseExp, &errCode, &errMsg)
 	if err != nil {
 		return t, err
@@ -152,6 +152,10 @@ func scanTask(s scanner) (domain.Task, error) {
 	if leaseExp.Valid {
 		v, _ := time.Parse(time.RFC3339, leaseExp.String)
 		t.LeaseExpiresAt = &v
+	}
+	if idempotencyKey.Valid {
+		v := idempotencyKey.String
+		t.IdempotencyKey = &v
 	}
 	if leaseOwner.Valid {
 		v := leaseOwner.String
