@@ -98,10 +98,10 @@ func mysqlPrecheck(ctx context.Context, params map[string]any) (precheckResult, 
 		add("disk", "pass", "disk space requirement satisfied", dataStatus)
 	}
 
-	if running := mysqldRunning(); running {
-		add("mysqld", "block", "mysqld process already exists on host", nil)
+	if conflict, detail := mysqlProcessConflict(port, dataDir); conflict {
+		add("mysqld", "block", "conflicting mysqld process detected for target port or data directory", detail)
 	} else {
-		add("mysqld", "pass", "no mysqld process detected", nil)
+		add("mysqld", "pass", "no conflicting mysqld process detected", detail)
 	}
 
 	serviceName := fmt.Sprintf("dbops-mysql-%d", port)
@@ -166,28 +166,43 @@ func inspectMySQLDataDir(path string, minFree uint64) (dataDirStatus, error) {
 	return status, nil
 }
 
-func mysqldRunning() bool {
+func mysqlProcessConflict(port int, dataDir string) (bool, []map[string]any) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return false
+		return false, nil
 	}
+	targetPortA := fmt.Sprintf("--port=%d", port)
+	targetPortB := fmt.Sprintf("--port %d", port)
+	targetDataA := "--datadir=" + filepath.Clean(dataDir)
+	targetDataB := "--datadir " + filepath.Clean(dataDir)
+	var matches []map[string]any
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		if _, err := strconv.Atoi(entry.Name()); err != nil {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "comm"))
+		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		name := strings.TrimSpace(string(b))
-		if name == "mysqld" || name == "mysqld_safe" {
-			return true
+		comm, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "comm"))
+		if err != nil {
+			continue
+		}
+		name := strings.TrimSpace(string(comm))
+		if name != "mysqld" && name != "mysqld_safe" {
+			continue
+		}
+		cmdlineBytes, _ := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
+		cmdline := strings.ReplaceAll(string(cmdlineBytes), "\x00", " ")
+		conflict := strings.Contains(cmdline, targetPortA) ||
+			strings.Contains(cmdline, targetPortB) ||
+			strings.Contains(cmdline, targetDataA) ||
+			strings.Contains(cmdline, targetDataB)
+		if conflict {
+			matches = append(matches, map[string]any{"pid": pid, "command": name})
 		}
 	}
-	return false
+	return len(matches) > 0, matches
 }
 
 func existingSystemdUnit(name string) string {
