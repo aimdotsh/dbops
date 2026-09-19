@@ -10,8 +10,11 @@ import (
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/httpapi"
+	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
+	"github.com/aimdotsh/dbops/internal/security"
+	"github.com/aimdotsh/dbops/internal/software"
 	"github.com/aimdotsh/dbops/internal/storage"
 	"github.com/aimdotsh/dbops/internal/task"
 )
@@ -58,10 +61,19 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
+	cipher, err := security.NewCipher(cfg.Security.MasterKey)
+	if err != nil {
+		stores.Close()
+		return nil, err
+	}
+
 	hostRepo := reposqlite.HostRepo{DB: stores.Metadata}
 	agentRepo := reposqlite.AgentRepo{DB: stores.Metadata}
 	dbRepo := reposqlite.DatabaseRepo{DB: stores.Metadata}
 	taskRepo := reposqlite.TaskRepo{DB: stores.Metadata}
+	packageRepo := reposqlite.SoftwarePackageRepo{DB: stores.Metadata}
+	credentialRepo := reposqlite.CredentialRepo{DB: stores.Metadata}
+	serverIDRepo := reposqlite.ServerIDRepo{DB: stores.Metadata}
 
 	gateway := agentgateway.New(
 		agentRepo,
@@ -70,6 +82,26 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cfg.AgentGateway.HeartbeatTimeoutSeconds,
 		cfg.AgentGateway.BootstrapToken,
 		cfg.AgentGateway.AllowInsecureRegistration,
+	)
+
+	softwareService := software.New(
+		packageRepo,
+		cfg.Storage.SoftwareDir,
+		cfg.Server.PublicURL,
+		cfg.Security.PackageSigningKey,
+	)
+
+	mysqlInstaller := mysqlinstall.New(
+		agentRepo,
+		dbRepo,
+		packageRepo,
+		credentialRepo,
+		serverIDRepo,
+		taskRepo,
+		softwareService,
+		cipher,
+		gateway,
+		cfg.MySQLInstall.AllowProcessMode,
 	)
 
 	taskEngine := task.New(
@@ -83,6 +115,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		return map[string]any{"echo": t.ParametersJSON}, nil
 	})
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
+	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 
 	return &App{
 		cfg:    cfg,
@@ -94,6 +127,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			agentRepo,
 			dbRepo,
 			taskRepo,
+			softwareService,
+			mysqlInstaller,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),
