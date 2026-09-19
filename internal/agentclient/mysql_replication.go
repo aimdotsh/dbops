@@ -30,14 +30,14 @@ func mysqlReplicationPrecheck(ctx context.Context, params map[string]any) (map[s
 	logBin := fields[4] == "1" || strings.EqualFold(fields[4], "ON")
 	ok := strings.EqualFold(fields[3], "ON") && logBin && strings.EqualFold(fields[5], "ROW") && serverID > 0
 	return map[string]any{
-		"ok": ok,
-		"version": fields[0],
-		"server_uuid": fields[1],
-		"server_id": serverID,
-		"gtid_mode": fields[3],
-		"log_bin": logBin,
-		"binlog_format": fields[5],
-		"read_only": fields[6],
+		"ok":              ok,
+		"version":         fields[0],
+		"server_uuid":     fields[1],
+		"server_id":       serverID,
+		"gtid_mode":       fields[3],
+		"log_bin":         logBin,
+		"binlog_format":   fields[5],
+		"read_only":       fields[6],
 		"super_read_only": fields[7],
 	}, nil
 }
@@ -120,17 +120,17 @@ func mysqlReplicationStatus(ctx context.Context, params map[string]any) (map[str
 		status = "healthy"
 	}
 	return map[string]any{
-		"configured": true,
-		"status": status,
-		"io_thread_status": ioRunning,
-		"sql_thread_status": sqlRunning,
+		"configured":              true,
+		"status":                  status,
+		"io_thread_status":        ioRunning,
+		"sql_thread_status":       sqlRunning,
 		"replication_lag_seconds": lag,
-		"source_uuid": values["Source_UUID"],
-		"source_host": values["Source_Host"],
-		"last_io_error": values["Last_IO_Error"],
-		"last_sql_error": values["Last_SQL_Error"],
-		"retrieved_gtid_set": values["Retrieved_Gtid_Set"],
-		"executed_gtid_set": values["Executed_Gtid_Set"],
+		"source_uuid":             values["Source_UUID"],
+		"source_host":             values["Source_Host"],
+		"last_io_error":           values["Last_IO_Error"],
+		"last_sql_error":          values["Last_SQL_Error"],
+		"retrieved_gtid_set":      values["Retrieved_Gtid_Set"],
+		"executed_gtid_set":       values["Executed_Gtid_Set"],
 	}, nil
 }
 

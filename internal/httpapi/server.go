@@ -17,13 +17,13 @@ import (
 )
 
 type Server struct {
-	http           *http.Server
-	hosts          repository.HostRepository
-	agents         repository.AgentRepository
-	dbs            repository.DatabaseRepository
-	tasks          repository.TaskRepository
-	software       *software.Service
-	mysqlInstaller *mysqlinstall.Service
+	http             *http.Server
+	hosts            repository.HostRepository
+	agents           repository.AgentRepository
+	dbs              repository.DatabaseRepository
+	tasks            repository.TaskRepository
+	software         *software.Service
+	mysqlInstaller   *mysqlinstall.Service
 	mysqlReplication *mysqlreplication.Service
 }
 
