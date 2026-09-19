@@ -229,27 +229,6 @@ CREATE TABLE IF NOT EXISTS backup_jobs (
 CREATE INDEX IF NOT EXISTS idx_backup_jobs_instance_status ON backup_jobs(database_instance_id,status);
 
 
-CREATE TABLE IF NOT EXISTS archive_jobs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id INTEGER NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
-  source_instance_id INTEGER NOT NULL REFERENCES database_instances(id),
-  source_database TEXT NOT NULL,
-  source_table TEXT NOT NULL,
-  destination_database TEXT,
-  destination_table TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  started_at TEXT,
-  finished_at TEXT,
-  scanned_rows INTEGER NOT NULL DEFAULT 0,
-  archived_rows INTEGER NOT NULL DEFAULT 0,
-  deleted_rows INTEGER NOT NULL DEFAULT 0,
-  failed_rows INTEGER NOT NULL DEFAULT 0,
-  verification_status TEXT,
-  error_message TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_archive_jobs_source_status ON archive_jobs(source_instance_id,status);
-
-
 CREATE TABLE IF NOT EXISTS alert_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   resource_type TEXT NOT NULL,
