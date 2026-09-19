@@ -97,6 +97,12 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 			return mysqlInstall(ctx, e.workDir, req, report)
 		}
 		return mysqlInstallPlan(req.Params)
+	case "mysql.replication.precheck":
+		return mysqlReplicationPrecheck(ctx, req.Params)
+	case "mysql.replication.create":
+		return mysqlReplicationCreate(ctx, req.Params)
+	case "mysql.replication.status":
+		return mysqlReplicationStatus(ctx, req.Params)
 	default:
 		return nil, fmt.Errorf("action %q is allowed but not implemented by this agent version", req.Action)
 	}
