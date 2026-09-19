@@ -60,6 +60,14 @@ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 	return r.Get(ctx, d.ID)
 }
 
+func (r DatabaseRepo) CreateImported(ctx context.Context, d domain.DatabaseInstance) (domain.DatabaseInstance, error) {
+	d.ManagedMode = "imported"
+	if d.Status == "" {
+		d.Status = "online"
+	}
+	return r.CreateInstalled(ctx, d)
+}
+
 type databaseScanner interface{ Scan(...any) error }
 
 func scanDatabase(s databaseScanner) (domain.DatabaseInstance, error) {
