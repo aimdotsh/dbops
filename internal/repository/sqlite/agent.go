@@ -65,7 +65,6 @@ func (r AgentRepo) List(ctx context.Context) ([]domain.Agent, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []domain.Agent
 	for rows.Next() {
 		a, err := scanAgent(rows)
@@ -92,7 +91,6 @@ ON CONFLICT(ip_address) DO UPDATE SET
 	if err != nil {
 		return nil, err
 	}
-
 	var id int64
 	if err := r.DB.QueryRowContext(ctx, "SELECT id FROM hosts WHERE ip_address=?", ip).Scan(&id); err != nil {
 		return nil, err
@@ -101,6 +99,23 @@ ON CONFLICT(ip_address) DO UPDATE SET
 		return nil, err
 	}
 	return &id, nil
+}
+
+func (r AgentRepo) GetCredentialHash(ctx context.Context, uuid string) (string, error) {
+	var hash sql.NullString
+	if err := r.DB.QueryRowContext(ctx, "SELECT token_hash FROM agents WHERE agent_uuid=?", uuid).Scan(&hash); err != nil {
+		return "", err
+	}
+	if !hash.Valid {
+		return "", nil
+	}
+	return hash.String, nil
+}
+
+func (r AgentRepo) SetCredentialHash(ctx context.Context, uuid, hash string) error {
+	_, err := r.DB.ExecContext(ctx, "UPDATE agents SET token_hash=?,updated_at=? WHERE agent_uuid=?",
+		hash, time.Now().UTC().Format(time.RFC3339), uuid)
+	return err
 }
 
 type agentScanner interface{ Scan(...any) error }
