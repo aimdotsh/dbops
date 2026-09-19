@@ -168,11 +168,13 @@ func (c *Client) heartbeatLoop(ctx context.Context, conn *websocket.Conn) error 
 }
 
 func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req agentproto.ActionRequest) {
-	select {
-	case c.sem <- struct{}{}:
-		defer func() { <-c.sem }()
-	case <-parent.Done():
-		return
+	if !isControlAction(req.Action) {
+		select {
+		case c.sem <- struct{}{}:
+			defer func() { <-c.sem }()
+		case <-parent.Done():
+			return
+		}
 	}
 	c.running.Add(1)
 	defer c.running.Add(-1)
@@ -288,4 +290,14 @@ func primaryIP() string {
 		return addr.IP.String()
 	}
 	return ""
+}
+
+
+func isControlAction(action string) bool {
+	switch action {
+	case "mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop":
+		return true
+	default:
+		return false
+	}
 }
