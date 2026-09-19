@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/aimdotsh/dbops/internal/alert"
 	"github.com/aimdotsh/dbops/internal/domain"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
@@ -27,6 +28,7 @@ type Server struct {
 	dbs              repository.DatabaseRepository
 	tasks            repository.TaskRepository
 	metrics          *metricstore.Store
+	alerts           *alert.Engine
 	software         *software.Service
 	mysqlInstaller   *mysqlinstall.Service
 	mysqlBackup      *mysqlbackup.Service
@@ -42,6 +44,7 @@ func New(
 	dbs repository.DatabaseRepository,
 	tasks repository.TaskRepository,
 	metricsStore *metricstore.Store,
+	alertEngine *alert.Engine,
 	softwareService *software.Service,
 	mysqlInstaller *mysqlinstall.Service,
 	mysqlBackup *mysqlbackup.Service,
@@ -55,7 +58,7 @@ func New(
 	r := gin.New()
 	r.Use(gin.Recovery())
 
-	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, metrics: metricsStore, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
+	s := &Server{hosts: hosts, agents: agents, dbs: dbs, tasks: tasks, metrics: metricsStore, alerts: alertEngine, software: softwareService, mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive, mysqlReplication: mysqlReplication, mysqlService: mysqlService}
 
 	v1 := r.Group("/api/v1")
 	v1.GET("/health", s.health)
@@ -67,6 +70,8 @@ func New(
 	v1.GET("/databases", s.listDatabases)
 	v1.GET("/metrics/latest", s.getLatestMetric)
 	v1.GET("/metrics/range", s.getMetricRange)
+	v1.GET("/alerts", s.listAlerts)
+	v1.POST("/alerts/:id/ack", s.acknowledgeAlert)
 	v1.GET("/software/packages", s.listSoftwarePackages)
 	v1.POST("/software/packages", s.uploadSoftwarePackage)
 	v1.GET("/software/packages/:id/download", s.downloadSoftwarePackage)
