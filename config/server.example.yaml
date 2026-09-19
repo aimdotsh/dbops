@@ -35,6 +35,14 @@ security:
   master_key_env: DBOPS_MASTER_KEY
   package_signing_key_env: DBOPS_PACKAGE_SIGNING_KEY
 
+auth:
+  enabled: true
+  jwt_secret_env: DBOPS_JWT_SECRET
+  access_minutes: 15
+  refresh_hours: 168
+  bootstrap_admin_username: admin
+  bootstrap_admin_password_env: DBOPS_ADMIN_PASSWORD
+
 mysql_install:
   allow_process_mode: false
 
