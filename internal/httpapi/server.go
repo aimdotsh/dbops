@@ -11,6 +11,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/alert"
 	authsvc "github.com/aimdotsh/dbops/internal/auth"
 	"github.com/aimdotsh/dbops/internal/domain"
+	dorissvc "github.com/aimdotsh/dbops/internal/doris"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
@@ -41,6 +42,7 @@ type Server struct {
 	mysqlService     *mysqlservice.Service
 	oracle           *oraclesvc.Service
 	postgres         *pgsvc.Service
+	doris            *dorissvc.Service
 }
 
 func New(
@@ -60,6 +62,7 @@ func New(
 	mysqlService *mysqlservice.Service,
 	oracleService *oraclesvc.Service,
 	postgresService *pgsvc.Service,
+	dorisService *dorissvc.Service,
 	agentWS http.Handler,
 	websocketPath string,
 ) *Server {
@@ -71,7 +74,7 @@ func New(
 		auth: authService, hosts: hosts, agents: agents, dbs: dbs, tasks: tasks,
 		metrics: metricsStore, alerts: alertEngine, software: softwareService,
 		mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive,
-		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService, postgres: postgresService,
+		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService, postgres: postgresService, doris: dorisService,
 	}
 
 	v1 := r.Group("/api/v1")
@@ -144,6 +147,11 @@ func New(
 	protected.GET("/postgres/instances/:id/replication", read, s.postgresReplicationStatus)
 	protected.GET("/postgres/backups", read, s.listPostgresBackups)
 	protected.POST("/postgres/instances/:id/backups", ops, s.createPostgresBackup)
+
+	protected.POST("/doris/instances", adminDBA, s.onboardDoris)
+	protected.GET("/doris/instances/:id/status", read, s.dorisClusterStatus)
+	protected.GET("/doris/backups", read, s.listDorisBackups)
+	protected.POST("/doris/instances/:id/backups", ops, s.createDorisBackup)
 
 	protected.GET("/tasks", read, s.listTasks)
 	protected.POST("/tasks", superAdmin, s.createTask)
