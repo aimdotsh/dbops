@@ -10,6 +10,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/httpapi"
+	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
@@ -81,10 +82,12 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	replicationRepo := reposqlite.MySQLReplicationRepo{DB: stores.Metadata}
 	backupRepo := reposqlite.BackupJobRepo{DB: stores.Metadata}
 	archiveRepo := reposqlite.ArchiveJobRepo{DB: stores.Metadata}
+	metricsStore := metricstore.NewStore(stores.Metrics)
 
 	gateway := agentgateway.New(
 		agentRepo,
 		taskRepo,
+		metricsStore,
 		logger,
 		cfg.AgentGateway.HeartbeatTimeoutSeconds,
 		cfg.AgentGateway.BootstrapToken,
@@ -154,6 +157,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			agentRepo,
 			dbRepo,
 			taskRepo,
+			metricsStore,
 			softwareService,
 			mysqlInstaller,
 			mysqlBackup,
