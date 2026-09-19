@@ -129,10 +129,12 @@ func New(
 
 	protected.POST("/oracle/instances", adminDBA, s.onboardOracle)
 	protected.GET("/oracle/instances/:id/status", read, s.oracleStatus)
+	protected.GET("/oracle/instances/:id/dataguard", read, s.oracleDataGuardStatus)
 	protected.GET("/oracle/instances/:id/tablespaces", read, s.oracleTablespaces)
 	protected.GET("/oracle/instances/:id/datafiles", read, s.oracleDatafiles)
 	protected.POST("/oracle/instances/:id/datafiles", adminDBA, s.addOracleDatafile)
 	protected.POST("/oracle/instances/:id/datafiles/resize", adminDBA, s.resizeOracleDatafile)
+	protected.POST("/oracle/instances/:id/backups/rman", ops, s.createOracleRMANBackup)
 
 	protected.GET("/tasks", read, s.listTasks)
 	protected.POST("/tasks", superAdmin, s.createTask)
