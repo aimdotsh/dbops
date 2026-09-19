@@ -143,3 +143,20 @@ type MySQLReplication struct {
 	CreatedAt               time.Time  `json:"created_at"`
 	UpdatedAt               time.Time  `json:"updated_at"`
 }
+
+
+type BackupJob struct {
+	ID                 int64      `json:"id"`
+	TaskID             int64      `json:"task_id"`
+	DatabaseInstanceID int64      `json:"database_instance_id"`
+	BackupEngine       string     `json:"backup_engine"`
+	BackupType         string     `json:"backup_type"`
+	StartedAt          *time.Time `json:"started_at,omitempty"`
+	FinishedAt         *time.Time `json:"finished_at,omitempty"`
+	SizeBytes          int64      `json:"size_bytes"`
+	Status             string     `json:"status"`
+	StoragePath        string     `json:"storage_path,omitempty"`
+	Checksum           string     `json:"checksum,omitempty"`
+	MetadataJSON       string     `json:"metadata_json,omitempty"`
+	ErrorMessage       string     `json:"error_message,omitempty"`
+}
