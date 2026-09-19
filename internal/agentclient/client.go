@@ -193,7 +193,11 @@ func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req 
 		})
 	}
 
+	lastStep := defaultStep
 	reporter := func(resp agentproto.ActionResponse) {
+		if resp.Step.Code != "" {
+			lastStep = resp.Step
+		}
 		resp.RequestID = req.RequestID
 		resp.TaskID = req.TaskID
 		if resp.Status == "" {
@@ -205,7 +209,8 @@ func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req 
 	result, err := c.executor.ExecuteWithReporter(parent, req, reporter)
 	if err != nil {
 		if req.Action == "mysql.install" {
-			defaultStep = agentproto.Step{No: 18, Code: "INITIALIZE_ACCOUNTS", Name: "Initialize accounts", Status: "failed"}
+			defaultStep = lastStep
+			defaultStep.Status = "failed"
 		} else {
 			defaultStep.Status = "failed"
 		}
@@ -222,7 +227,8 @@ func (c *Client) handleAction(parent context.Context, conn *websocket.Conn, req 
 	}
 
 	if req.Action == "mysql.install" {
-		defaultStep = agentproto.Step{No: 18, Code: "INITIALIZE_ACCOUNTS", Name: "Initialize accounts", Status: "success"}
+		defaultStep = lastStep
+		defaultStep.Status = "success"
 	} else {
 		defaultStep.Status = "success"
 	}
