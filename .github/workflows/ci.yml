@@ -338,7 +338,7 @@ jobs:
           PY
 
           python3 - <<'PY'
-          import json, os, time, urllib.request
+          import json, os, time, urllib.error, urllib.request
 
           base = "http://127.0.0.1:18080/api/v1"
           agent_id = int(open("/tmp/agent-id").read())
@@ -521,7 +521,8 @@ jobs:
           if archive_final["status"] != "success":
               raise SystemExit(f"mysql.archive failed: {archive_final}")
 
-          archive_steps = get(f"/tasks/{archive_task['id']}/steps")
+          with urllib.request.urlopen(base + f"/tasks/{archive_task['id']}/steps", timeout=5) as r:
+              archive_steps = json.load(r)["data"]
           if len(archive_steps) != 3 or any(s["status"] != "success" for s in archive_steps):
               raise SystemExit(f"archive steps invalid: {archive_steps}")
 
