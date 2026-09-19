@@ -57,6 +57,15 @@ type MySQLReplicationRepository interface {
 	UpdateStatus(context.Context, int64, domain.MySQLReplication) error
 }
 
+type BackupJobRepository interface {
+	Create(context.Context, domain.BackupJob) (domain.BackupJob, error)
+	Get(context.Context, int64) (domain.BackupJob, error)
+	List(context.Context, int64) ([]domain.BackupJob, error)
+	MarkRunning(context.Context, int64) error
+	MarkSuccess(context.Context, int64, int64, string, string, string) error
+	MarkFailed(context.Context, int64, string) error
+}
+
 type TaskRepository interface {
 	Create(context.Context, domain.Task) (domain.Task, error)
 	Get(context.Context, int64) (domain.Task, error)
