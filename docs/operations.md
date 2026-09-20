@@ -42,7 +42,7 @@ SuperAdmin 在“操作中心”创建项目、环境和用户；分配主机的
 
 ## MySQL 安装与恢复
 
-上传与目标架构匹配的 MySQL 二进制 tar.gz，选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。实际 Linux systemd 验收仍需专用主机。
+软件仓库现在可保存并下载目标架构匹配的 MySQL tar.gz，以及 Percona XtraBackup ARM64/AMD64 `.deb` 包。MySQL 安装器只接受二进制 tar.gz/tgz；`.deb` 包入库后供后续 XtraBackup Agent 执行器使用，不会被 MySQL 安装器误安装。选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。
 
 GTID 复制配置要求操作者已完成一致基线准备，并明确确认 baseline_ready。当前流程不自动传输或还原基线，不代表支持一键从任意已有数据建立复制。
 
