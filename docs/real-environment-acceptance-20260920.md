@@ -11,6 +11,7 @@
 | clp01 | 本次恢复目标 | 5 / 13310 | `/opt/dbops/mysql/13310` / `dbops-mysql13310.service` |
 | clp02 | 本次恢复目标 | 6 / 13310 | 同上，各自位于对应主机 |
 | clp01 | 任务中断专用实例 | 4 / 13309 | `/opt/dbops/mysql/13309` / `dbops-mysql13309.service` |
+| clp02 | XtraBackup 物理恢复目标 | 7 / 13311 | `/opt/dbops/mysql/13311` / `dbops-mysql13311.service` |
 
 两台主机均为 Ubuntu 24.04 ARM64，MySQL 实际版本 `8.0.46-0ubuntu0.24.04.4`。Server 在 clp01，Agent 主动建立 mTLS 连接。原有主从一致基线为手工准备，当前验收没有重新初始化主从、清除 GTID 或修改任务状态来伪造成功。
 
@@ -40,6 +41,14 @@
 备份 3 SHA256：`b6db1500c149fd18c424386a179057abc5719f1fff4b477fde84ba5984f6ddca`。
 
 这是两台主机各自的备份恢复验证。平台自动恢复仍要求源和目标位于同一在线 Agent、版本一致且目标没有业务库；未实现跨主机备份传输或跨 Agent 自动恢复。
+
+## XtraBackup 物理基线
+
+从官方 Percona ARM64 仓库下载 `percona-xtrabackup-80_8.0.35-36-1.noble_arm64.deb`，SHA256 为 `2b4109bedaccba09e02318f7a92ea543ac327a7120284efa75189ae63b3f0408`。包只解包到测试目录，没有安装系统包；两台主机均能运行：`xtrabackup version 8.0.35-36 ... (aarch64)`。
+
+clp01 对 13307 主库执行真实在线 `xtrabackup --backup`，备份目录约 71 MB，记录 GTID `e9ed050c-b48b-11f1-abd8-f068e385833a:1-18` 和 binlog `mysql-bin.000005:197`；随后 `xtrabackup --prepare` 完成。备份通过受控传输复制到 clp02，以 `--copy-back` 恢复到全新 13311 实例并启动 systemd。恢复实例 UUID 为 `661b93a7-b49d-11f1-bc9d-f068e3858aee`，端口 13311，数据表六条记录与主库逐条一致。
+
+Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x，因此本次 MySQL 8.0.46 验证使用该版本；备份工具和 MySQL 版本仍应由软件兼容矩阵管理。
 
 ## 下一项计划与环境阻塞
 
