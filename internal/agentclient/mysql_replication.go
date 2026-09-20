@@ -109,9 +109,12 @@ func mysqlReplicationStatus(ctx context.Context, params map[string]any) (map[str
 	if len(values) == 0 {
 		return map[string]any{"configured": false, "status": "not_configured"}, nil
 	}
-	lag := int64(0)
+	var lag any
 	if v := values["Seconds_Behind_Source"]; v != "" && !strings.EqualFold(v, "NULL") {
-		lag, _ = strconv.ParseInt(v, 10, 64)
+		parsed, parseErr := strconv.ParseInt(v, 10, 64)
+		if parseErr == nil {
+			lag = parsed
+		}
 	}
 	ioRunning := values["Replica_IO_Running"]
 	sqlRunning := values["Replica_SQL_Running"]
@@ -151,12 +154,15 @@ func runMySQLQuery(ctx context.Context, baseDir, runDir, password, query string,
 	}
 	defer os.RemoveAll(work)
 	cfg := filepath.Join(work, "client.cnf")
-	content := "[client]\nuser=root\npassword=" + password + "\nsocket=" + runDir + "/mysql.sock\n"
+	content := "[client]\nuser=root\npassword=" + mysqlOption(password) + "\nsocket=" + runDir + "/mysql.sock\n"
 	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		return "", err
 	}
 	mysqlBin := filepath.Join(baseDir, "bin", "mysql")
 	args := []string{"--defaults-extra-file=" + cfg, "--batch", "--skip-column-names"}
+	if strings.Contains(query, "SHOW REPLICA STATUS") {
+		args = []string{"--defaults-extra-file=" + cfg, "--batch", "--vertical"}
+	}
 	cmd := exec.CommandContext(ctx, mysqlBin, args...)
 	if stdinMode {
 		cmd.Stdin = strings.NewReader(query + "\n")

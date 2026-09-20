@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,4 +34,23 @@ func (s *Server) acknowledgeAlert(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"code": "OK", "message": "acknowledged"})
+}
+
+func (s *Server) silenceAlert(c *gin.Context) {
+	id, valid := parseID(c)
+	if !valid {
+		return
+	}
+	var req struct {
+		Seconds int `json:"seconds"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER"})
+		return
+	}
+	if err := s.alerts.Silence(c.Request.Context(), id, time.Duration(req.Seconds)*time.Second); err != nil {
+		c.JSON(400, gin.H{"code": "SILENCE_REJECTED", "message": err.Error()})
+		return
+	}
+	ok(c, req)
 }

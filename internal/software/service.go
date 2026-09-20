@@ -65,8 +65,8 @@ func (s *Service) Store(ctx context.Context, req StoreRequest, src io.Reader) (d
 	if req.PackageType == "" {
 		req.PackageType = inferPackageType(req.FileName)
 	}
-	if req.PackageType != "tar.gz" && req.PackageType != "tgz" {
-		return domain.SoftwarePackage{}, fmt.Errorf("unsupported package_type %q; V1 MySQL installer supports tar.gz/tgz", req.PackageType)
+	if req.PackageType != "tar.gz" && req.PackageType != "tgz" && req.PackageType != "deb" {
+		return domain.SoftwarePackage{}, fmt.Errorf("unsupported package_type %q; supported types are tar.gz, tgz and deb", req.PackageType)
 	}
 	if req.CompatibilityJSON == "" {
 		req.CompatibilityJSON = "{}"
@@ -187,6 +187,9 @@ func inferPackageType(name string) string {
 	}
 	if strings.HasSuffix(lower, ".tgz") {
 		return "tgz"
+	}
+	if strings.HasSuffix(lower, ".deb") {
+		return "deb"
 	}
 	return ""
 }

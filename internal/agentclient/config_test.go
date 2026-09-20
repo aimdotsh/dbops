@@ -26,6 +26,9 @@ func TestCredentialPersistenceAndBootstrapFallback(t *testing.T) {
 		t.Fatalf("unexpected initial auth: credential=%q token=%q", credential, token)
 	}
 
+	if err := os.WriteFile(cfg.Security.CredentialFile, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := SaveCredential(cfg, "persistent-value"); err != nil {
 		t.Fatal(err)
 	}
@@ -43,5 +46,21 @@ func TestCredentialPersistenceAndBootstrapFallback(t *testing.T) {
 	}
 	if credential != "persistent-value" || token != "" {
 		t.Fatalf("persistent credential not preferred: credential=%q token=%q", credential, token)
+	}
+}
+
+func TestExplicitAdvertiseIP(t *testing.T) {
+	var cfg Config
+	cfg.Agent.AdvertiseIP = "10.10.1.25"
+	client := &Client{cfg: cfg}
+	if got := client.advertiseIP(); got != "10.10.1.25" {
+		t.Fatalf("advertised wrong interface: %s", got)
+	}
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  url: https://example.test\nagent:\n  advertise_ip: bad-host-name\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("invalid advertise IP accepted")
 	}
 }

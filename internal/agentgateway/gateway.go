@@ -34,6 +34,7 @@ type Gateway struct {
 	heartbeatTimeout time.Duration
 	bootstrapToken   string
 	allowInsecure    bool
+	requireMTLS      bool
 
 	mu      sync.RWMutex
 	clients map[int64]*client
@@ -94,7 +95,13 @@ func (g *Gateway) Start(ctx context.Context) {
 	}()
 }
 
+func (g *Gateway) RequireMTLS(enabled bool) { g.requireMTLS = enabled }
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if g.requireMTLS && (r.TLS == nil || len(r.TLS.VerifiedChains) == 0) {
+		http.Error(w, "verified client certificate required", http.StatusUnauthorized)
+		return
+	}
+
 	upgrader := websocket.Upgrader{
 		HandshakeTimeout: 10 * time.Second,
 		CheckOrigin: func(*http.Request) bool {
@@ -122,6 +129,10 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var hello agentproto.Hello
 	if err := json.Unmarshal(env.Data, &hello); err != nil || hello.AgentUUID == "" {
 		g.reject(conn, "invalid hello")
+		return
+	}
+	if g.requireMTLS && r.TLS.PeerCertificates[0].Subject.CommonName != hello.AgentUUID {
+		g.reject(conn, "certificate identity mismatch")
 		return
 	}
 	if hello.ProtocolVersion != agentproto.ProtocolVersion {

@@ -2,6 +2,7 @@ package agentclient
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -15,11 +16,15 @@ type Config struct {
 	} `yaml:"server"`
 	Agent struct {
 		ID               string `yaml:"id"`
+		AdvertiseIP      string `yaml:"advertise_ip"`
 		HeartbeatSeconds int    `yaml:"heartbeat_seconds"`
 		WorkDir          string `yaml:"work_dir"`
 		LogDir           string `yaml:"log_dir"`
 	} `yaml:"agent"`
 	Security struct {
+		CAFile             string `yaml:"ca_file"`
+		CertFile           string `yaml:"cert_file"`
+		KeyFile            string `yaml:"key_file"`
 		BootstrapTokenFile string `yaml:"bootstrap_token_file"`
 		CredentialFile     string `yaml:"credential_file"`
 		VerifyServerTLS    bool   `yaml:"verify_server_tls"`
@@ -46,6 +51,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return cfg, err
+	}
+	if cfg.Agent.AdvertiseIP != "" && net.ParseIP(cfg.Agent.AdvertiseIP) == nil {
+		return cfg, fmt.Errorf("agent.advertise_ip must be a valid IP address")
 	}
 	if cfg.Server.URL == "" {
 		return cfg, fmt.Errorf("server.url is required")
@@ -109,7 +117,23 @@ func SaveCredential(cfg Config, credential string) error {
 	if err := os.MkdirAll(filepath.Dir(cfg.Security.CredentialFile), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(cfg.Security.CredentialFile, []byte(credential+"\n"), 0o600)
+	tmp, err := os.CreateTemp(filepath.Dir(cfg.Security.CredentialFile), ".credential-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.WriteString(credential + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), cfg.Security.CredentialFile)
 }
 
 func bytesTrimSpace(b []byte) []byte {

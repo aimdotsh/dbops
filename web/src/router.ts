@@ -12,6 +12,11 @@ const router = createRouter({
     { path: '/', component: DashboardView },
     { path: '/assets', component: AssetsView },
     { path: '/tasks', component: TasksView },
+    { path: '/schedules', component: () => import('./views/SchedulesView.vue') },
+    { path: '/metrics', component: () => import('./views/MetricsView.vue') },
+    { path: '/operations', component: () => import('./views/OperationsView.vue') },
+    { path: '/software', component: () => import('./views/SoftwareView.vue') },
+    { path: '/records', component: () => import('./views/RecordsView.vue') },
     { path: '/alerts', component: AlertsView },
   ],
 })

@@ -28,6 +28,9 @@ actions:
     timeout: 15
     risk: R0
     params: [path, require_empty, min_free_bytes]
+  - name: mysql.metrics
+    timeout: 15
+    risk: R0
   - name: mysql.precheck
     timeout: 120
     risk: R0
@@ -58,7 +61,13 @@ actions:
   - name: mysql.backup
     timeout: 86400
     risk: R1
+  - name: mysql.xtrabackup.backup
+    timeout: 86400
+    risk: R1
   - name: mysql.restore
+    timeout: 86400
+    risk: R4
+  - name: mysql.xtrabackup.restore
     timeout: 86400
     risk: R4
   - name: mysql.archive.precheck
@@ -110,5 +119,20 @@ actions:
     timeout: 60
     risk: R0
   - name: doris.backup
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.export
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.read
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.write
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.finish
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.cleanup
     timeout: 86400
     risk: R1

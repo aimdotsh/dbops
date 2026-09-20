@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"time"
@@ -14,12 +15,14 @@ import (
 	dorissvc "github.com/aimdotsh/dbops/internal/doris"
 	"github.com/aimdotsh/dbops/internal/httpapi"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
+	"github.com/aimdotsh/dbops/internal/monitor"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
 	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/mysqlreplication"
 	"github.com/aimdotsh/dbops/internal/mysqlservice"
 	oraclesvc "github.com/aimdotsh/dbops/internal/oracle"
+	"github.com/aimdotsh/dbops/internal/platformbackup"
 	pgsvc "github.com/aimdotsh/dbops/internal/postgres"
 	reposqlite "github.com/aimdotsh/dbops/internal/repository/sqlite"
 	"github.com/aimdotsh/dbops/internal/scheduler"
@@ -108,6 +111,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	archiveRepo := reposqlite.ArchiveJobRepo{DB: stores.Metadata}
 	metricsStore := metricstore.NewStore(stores.Metrics)
 	alertEngine := alert.New(logger, cfg.Alert.Enabled, cfg.Alert.EvaluateSeconds, stores.Metadata, metricsStore)
+	cfg.Notifications.WebhookToken = os.Getenv(cfg.Notifications.WebhookTokenEnv)
+	cfg.Notifications.SMTPPassword = os.Getenv(cfg.Notifications.SMTPPasswordEnv)
+	alertEngine.ConfigureNotifications(cfg.Notifications)
 
 	gateway := agentgateway.New(
 		agentRepo,
@@ -118,6 +124,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cfg.AgentGateway.BootstrapToken,
 		cfg.AgentGateway.AllowInsecureRegistration,
 	)
+
+	gateway.RequireMTLS(cfg.AgentGateway.RequireMTLS)
 
 	softwareService := software.New(
 		packageRepo,
@@ -140,7 +148,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlBackup := mysqlbackup.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
+	mysqlBackup.SetInstaller(mysqlInstaller)
 	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archivePolicyRepo, archiveRepo, taskRepo, cipher, gateway)
+	mysqlArchive.SetReplications(replicationRepo)
 
 	mysqlReplication := mysqlreplication.New(
 		hostRepo,
@@ -165,12 +175,16 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		cfg.Task.LeaseSeconds,
 		cfg.Task.ScanIntervalSeconds,
 	)
+	platformBackup := &platformbackup.Service{Metadata: stores.Metadata, Metrics: stores.Metrics, Directory: cfg.Storage.PlatformBackupDir, Tasks: taskRepo}
+	taskEngine.Register("platform.backup", platformBackup.Handler())
 	taskEngine.Register("system.echo", func(ctx context.Context, t domain.Task) (any, error) {
 		return map[string]any{"echo": t.ParametersJSON}, nil
 	})
 	taskEngine.Register("agent.action", task.AgentActionHandler(gateway, taskRepo))
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 	taskEngine.Register("mysql.backup", mysqlBackup.Handler())
+	taskEngine.Register("mysql.restore", mysqlBackup.RestoreHandler())
+	taskEngine.Register("mysql.restore_new", mysqlBackup.NewHostHandler())
 	taskEngine.Register("mysql.archive.run", mysqlArchive.RunHandler())
 	taskEngine.Register("mysql.archive.control", mysqlArchive.ControlHandler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())
@@ -181,12 +195,78 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("postgres.backup", postgresService.BackupHandler())
 	taskEngine.Register("doris.backup", dorisService.BackupHandler())
 
-	return &App{
+	policies := &scheduler.Policies{DB: stores.Metadata, Handlers: map[string]func(context.Context, json.RawMessage) (domain.Task, error){
+		"platform.backup": func(ctx context.Context, raw json.RawMessage) (domain.Task, error) {
+			return platformBackup.CreateTask(ctx)
+		},
+		"mysql.backup": func(ctx context.Context, raw json.RawMessage) (domain.Task, error) {
+			var req mysqlbackup.CreateRequest
+			if err := json.Unmarshal(raw, &req); err != nil {
+				return domain.Task{}, err
+			}
+			return mysqlBackup.CreateTask(ctx, req)
+		},
+		"postgres.backup": func(ctx context.Context, raw json.RawMessage) (domain.Task, error) {
+			var req struct {
+				InstanceID int64 `json:"instance_id"`
+				pgsvc.BackupRequest
+			}
+			if err := json.Unmarshal(raw, &req); err != nil {
+				return domain.Task{}, err
+			}
+			return postgresService.CreateBackupTask(ctx, req.InstanceID, req.BackupRequest)
+		},
+		"oracle.rman.backup": func(ctx context.Context, raw json.RawMessage) (domain.Task, error) {
+			var req struct {
+				InstanceID int64 `json:"instance_id"`
+				oraclesvc.RMANBackupRequest
+			}
+			if err := json.Unmarshal(raw, &req); err != nil {
+				return domain.Task{}, err
+			}
+			return oracleService.CreateRMANBackupTask(ctx, req.InstanceID, req.RMANBackupRequest)
+		},
+		"doris.backup": func(ctx context.Context, raw json.RawMessage) (domain.Task, error) {
+			var req struct {
+				InstanceID int64 `json:"instance_id"`
+				dorissvc.BackupRequest
+			}
+			if err := json.Unmarshal(raw, &req); err != nil {
+				return domain.Task{}, err
+			}
+			return dorisService.CreateBackupTask(ctx, req.InstanceID, req.BackupRequest)
+		},
+	}}
+	maintenance := scheduler.New(logger, cfg.Scheduler.Enabled, cfg.Scheduler.ScanIntervalSeconds)
+	databaseMonitor := &monitor.Monitor{Databases: dbRepo, Store: metricsStore, Collectors: map[string]monitor.Collector{
+		"mysql":      mysqlBackup.Metrics,
+		"oracle":     func(ctx context.Context, id int64) (any, error) { return oracleService.Status(ctx, id) },
+		"postgres":   func(ctx context.Context, id int64) (any, error) { return postgresService.Status(ctx, id) },
+		"postgresql": func(ctx context.Context, id int64) (any, error) { return postgresService.Status(ctx, id) },
+		"doris":      func(ctx context.Context, id int64) (any, error) { return dorisService.ClusterStatus(ctx, id) },
+	}}
+	maintenance.Add(databaseMonitor.Tick)
+	maintenance.Add(policies.Tick)
+	maintenance.Add(alertEngine.DeliverPending)
+	var lastRetention time.Time
+	maintenance.Add(func(ctx context.Context) error {
+		if time.Since(lastRetention) < time.Hour {
+			return nil
+		}
+		if err := metricsStore.Retain(ctx, time.Now(), cfg.MetricsRetention.Days5m, cfg.MetricsRetention.Days1h, cfg.MetricsRetention.Days1d); err != nil {
+			return err
+		}
+		lastRetention = time.Now()
+		return nil
+	})
+	a := &App{
 		cfg:    cfg,
 		logger: logger,
 		stores: stores,
 		http: httpapi.New(
 			cfg.Server.Listen,
+			platformBackup,
+			policies,
 			authService,
 			hostRepo,
 			agentRepo,
@@ -208,9 +288,14 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		),
 		tasks:     taskEngine,
 		gateway:   gateway,
-		scheduler: scheduler.New(logger, cfg.Scheduler.Enabled, cfg.Scheduler.ScanIntervalSeconds),
+		scheduler: maintenance,
 		alert:     alertEngine,
-	}, nil
+	}
+	if err := a.http.ConfigureTLS(cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile, cfg.Server.AgentCAFile); err != nil {
+		stores.Close()
+		return nil, err
+	}
+	return a, nil
 }
 
 func (a *App) Start(parent context.Context) error {
@@ -235,7 +320,9 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.cancel != nil {
 		a.cancel()
 	}
-	return a.http.Shutdown(ctx)
+	err := a.http.Shutdown(ctx)
+	a.tasks.Wait()
+	return err
 }
 
 func (a *App) Close() error {

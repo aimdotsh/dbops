@@ -27,6 +27,11 @@ function logout() {
       <el-menu router :default-active="route.path" class="nav">
         <el-menu-item index="/">Dashboard</el-menu-item>
         <el-menu-item index="/assets">资产管理</el-menu-item>
+        <el-menu-item index="/operations">数据库操作</el-menu-item>
+        <el-menu-item index="/metrics">监控趋势</el-menu-item>
+        <el-menu-item v-if="auth.user?.roles?.includes('SuperAdmin')" index="/schedules">定时备份</el-menu-item>
+        <el-menu-item index="/software">软件仓库</el-menu-item>
+        <el-menu-item index="/records">备份与运维记录</el-menu-item>
         <el-menu-item index="/tasks">任务中心</el-menu-item>
         <el-menu-item index="/alerts">告警中心</el-menu-item>
       </el-menu>

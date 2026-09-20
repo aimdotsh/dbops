@@ -2,6 +2,7 @@ server:
   url: https://dbops.example.com
 agent:
   id: auto
+  # advertise_ip: 10.10.1.25 # Explicit database/replication address on multi-interface hosts
   heartbeat_seconds: 30
   work_dir: /var/lib/dbops-agent
   log_dir: /var/log/dbops-agent
@@ -9,6 +10,9 @@ security:
   bootstrap_token_file: /etc/dbops-agent/bootstrap.token
   credential_file: /var/lib/dbops-agent/agent.credential
   verify_server_tls: true
+  # ca_file: /etc/dbops-agent/server-ca.crt
+  # cert_file: /etc/dbops-agent/agent.crt
+  # key_file: /etc/dbops-agent/agent.key
 executor:
   max_concurrent_tasks: 2
   allowed_actions_file: /etc/dbops-agent/actions.yaml

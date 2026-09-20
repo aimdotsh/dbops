@@ -9,6 +9,8 @@ import (
 )
 
 type mysqlBackupRequest struct {
+	Engine       string   `json:"engine,omitempty"`
+	ToolPath     string   `json:"tool_path,omitempty"`
 	AllDatabases bool     `json:"all_databases"`
 	Databases    []string `json:"databases,omitempty"`
 	OutputDir    string   `json:"output_dir,omitempty"`
@@ -26,7 +28,7 @@ func (s *Server) createMySQLBackup(c *gin.Context) {
 		return
 	}
 	task, err := s.mysqlBackup.CreateTask(c.Request.Context(), mysqlbackup.CreateRequest{
-		InstanceID: id, AllDatabases: body.AllDatabases, Databases: body.Databases,
+		InstanceID: id, Engine: body.Engine, ToolPath: body.ToolPath, AllDatabases: body.AllDatabases, Databases: body.Databases,
 		OutputDir: body.OutputDir, FileName: body.FileName,
 	})
 	if err != nil {
@@ -52,4 +54,32 @@ func (s *Server) listMySQLBackups(c *gin.Context) {
 		return
 	}
 	ok(c, items)
+}
+
+func (s *Server) createMySQLRestore(c *gin.Context) {
+	var req mysqlbackup.RestoreRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER"})
+		return
+	}
+	t, err := s.mysqlBackup.CreateRestoreTask(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "MYSQL_RESTORE_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(202, gin.H{"code": "OK", "data": t})
+}
+
+func (s *Server) createMySQLNewHostRestore(c *gin.Context) {
+	var req mysqlbackup.NewHostRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
+		return
+	}
+	t, err := s.mysqlBackup.CreateNewHostRestore(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "MYSQL_RESTORE_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(202, gin.H{"code": "OK", "data": t})
 }

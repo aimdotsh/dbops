@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/repository"
 )
 
 type TaskRepo struct{ DB *sql.DB }
@@ -16,6 +17,10 @@ type TaskRepo struct{ DB *sql.DB }
 var taskClaimMu sync.Mutex
 
 func (r TaskRepo) Create(ctx context.Context, t domain.Task) (domain.Task, error) {
+	occurrence := repository.Occurrence(ctx)
+	if occurrence != "" {
+		t.IdempotencyKey = &occurrence
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if t.TaskNo == "" {
 		t.TaskNo = fmt.Sprintf("TASK-%d", time.Now().UTC().UnixNano())
@@ -26,6 +31,12 @@ func (r TaskRepo) Create(ctx context.Context, t domain.Task) (domain.Task, error
 	res, err := r.DB.ExecContext(ctx, "INSERT INTO tasks(task_no,task_type,target_type,target_id,status,progress,parameters_json,result_json,agent_id,idempotency_key,created_at,queued_at,timeout_seconds,recovery_policy) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
 		t.TaskNo, t.TaskType, nullString(t.TargetType), t.TargetID, "queued", 0, t.ParametersJSON, "{}", t.AgentID, t.IdempotencyKey, now, now, 3600, "verify_before_retry")
 	if err != nil {
+		if occurrence != "" {
+			var existing int64
+			if lookupErr := r.DB.QueryRowContext(ctx, "SELECT id FROM tasks WHERE idempotency_key=?", occurrence).Scan(&existing); lookupErr == nil {
+				return r.Get(ctx, existing)
+			}
+		}
 		return t, err
 	}
 	t.ID, _ = res.LastInsertId()
@@ -60,32 +71,21 @@ func (r TaskRepo) ClaimNext(ctx context.Context, owner string, leaseSeconds int)
 	taskClaimMu.Lock()
 	defer taskClaimMu.Unlock()
 
-	tx, err := r.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	var id int64
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM tasks WHERE status='queued' ORDER BY id LIMIT 1").Scan(&id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
 	now := time.Now().UTC()
-	expires := now.Add(time.Duration(leaseSeconds) * time.Second)
-	res, err := tx.ExecContext(ctx, "UPDATE tasks SET status='running', started_at=COALESCE(started_at,?), lease_owner=?, lease_expires_at=? WHERE id=? AND status='queued'",
-		now.Format(time.RFC3339), owner, expires.Format(time.RFC3339), id)
-	if err != nil {
-		return nil, err
-	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
+	// A single write statement avoids a deferred transaction's read-to-write upgrade.
+	// Serialize actions on an agent, while reserving a lane for archive controls.
+	row := r.DB.QueryRowContext(ctx, `UPDATE tasks SET status='running',
+ started_at=COALESCE(started_at,?),lease_owner=?,lease_expires_at=?
+ WHERE id=(SELECT q.id FROM tasks q WHERE q.status='queued' AND
+ (q.task_type='mysql.archive.control' OR NOT EXISTS
+ (SELECT 1 FROM tasks active WHERE active.status IN ('running','interrupted')
+ AND active.task_type<>'mysql.archive.control' AND
+ (q.agent_id=active.agent_id OR q.task_type IN ('mysql.replication.create','mysql.restore_new') OR active.task_type IN ('mysql.replication.create','mysql.restore_new')))) ORDER BY q.id LIMIT 1)
+ RETURNING id`, now.Format(time.RFC3339), owner, now.Add(time.Duration(leaseSeconds)*time.Second).Format(time.RFC3339))
+	var id int64
+	if err := row.Scan(&id); errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
-	}
-	if err := tx.Commit(); err != nil {
+	} else if err != nil {
 		return nil, err
 	}
 	t, err := r.Get(ctx, id)
@@ -115,6 +115,16 @@ func (r TaskRepo) UpdateProgress(ctx context.Context, id int64, progress int) er
 
 func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
 	res, err := r.DB.ExecContext(ctx, "UPDATE tasks SET status='interrupted', lease_owner=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+		time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
+	// A cancelled context or process crash can prevent backup handlers from
+	// recording failure. Reconcile only unfinished records, never verified backups.
+	_, err = r.DB.ExecContext(ctx, `UPDATE backup_jobs SET status='failed',finished_at=?,
+ error_message='task ended without a verified backup; inspect agent output before retry'
+ WHERE status IN ('pending','running') AND task_id IN
+ (SELECT id FROM tasks WHERE status IN ('interrupted','cancelled','failed','timeout'))`,
 		time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return 0, err
@@ -177,4 +187,29 @@ func nullString(v string) any {
 		return nil
 	}
 	return v
+}
+
+// RenewLease cannot resurrect an interrupted task or another worker's claim.
+func (r TaskRepo) RenewLease(ctx context.Context, id int64, owner string, seconds int) error {
+	res, err := r.DB.ExecContext(ctx, `UPDATE tasks SET lease_expires_at=? WHERE id=? AND status='running' AND lease_owner=?`, time.Now().UTC().Add(time.Duration(seconds)*time.Second).Format(time.RFC3339), id, owner)
+	return requireOwned(res, err)
+}
+
+func (r TaskRepo) FinishOwned(ctx context.Context, id int64, owner, status, result, message string) error {
+	res, err := r.DB.ExecContext(ctx, `UPDATE tasks SET status=?,progress=CASE WHEN ?='success' THEN 100 ELSE progress END,result_json=?,error_message=NULLIF(?,''),finished_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_owner=?`, status, status, result, message, time.Now().UTC().Format(time.RFC3339), id, owner)
+	return requireOwned(res, err)
+}
+
+func requireOwned(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("task lease is no longer owned")
+	}
+	return nil
 }
