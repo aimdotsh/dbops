@@ -132,5 +132,8 @@ func TestDisposableMySQLInstall(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(root, "etc", "dbops-bootstrap.sql")); !os.IsNotExist(err) {
 		t.Fatal("bootstrap secret file retained")
 	}
+	if out, err := runMySQLQuery(ctx, base, run, password, "SELECT @@GLOBAL.gtid_executed", false); err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("bootstrap credentials entered replication log: %q %v", out, err)
+	}
 	t.Log("real mysqld installation, initialization, account hardening and cleanup verified")
 }

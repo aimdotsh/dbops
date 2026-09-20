@@ -157,6 +157,9 @@ func runMySQLQuery(ctx context.Context, baseDir, runDir, password, query string,
 	}
 	mysqlBin := filepath.Join(baseDir, "bin", "mysql")
 	args := []string{"--defaults-extra-file=" + cfg, "--batch", "--skip-column-names"}
+	if strings.Contains(query, "SHOW REPLICA STATUS") {
+		args = []string{"--defaults-extra-file=" + cfg, "--batch", "--vertical"}
+	}
 	cmd := exec.CommandContext(ctx, mysqlBin, args...)
 	if stdinMode {
 		cmd.Stdin = strings.NewReader(query + "\n")

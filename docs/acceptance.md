@@ -10,6 +10,7 @@
 | Web | `npm ci`、TypeScript 检查和 Vite 生产构建通过；存在主包体积提示，不影响构建 |
 | MySQL 真实安装 | 隔离 MySQL 8.0.46 Linux/AMD64 容器内，真实 mysqld 初始化与 process 模式启动，root 认证、拒绝无密码访问、bootstrap SQL 清理通过；复用官方镜像客户端/服务端，通过测试包装 tar 进入安装器 |
 | MySQL 真实逻辑恢复 | 真实 mysqldump、SHA256、gzip、拒绝非空目标、拒绝错误摘要，恢复两条测试记录并核对内容通过 |
+| MySQL 双机 systemd/GTID | clp01 与 clp02（Ubuntu 24.04 ARM64）使用独立目录和服务名完成 MySQL 8.0.46 安装；手工一致基线后创建 GTID 复制，IO/SQL 线程 Yes、延迟 0；主库新增记录在从库可见；从库 systemd 重启后复制仍为健康 |
 | 恢复范围限制 | 拒绝 all_databases、MySQL 系统 schema 和未知备份范围；只允许显式用户库进入运行时检查 |
 | 任务可靠性 | 并发领取唯一性、所有权完成、续租、停机中断、过期恢复，以及周期备份提交后宕机的幂等测试通过 |
 | 平台快照 | WAL 数据保存、完整性与摘要校验、恢复到新目录、拒绝已有目标、拒绝篡改通过 |

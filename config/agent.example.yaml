@@ -2,6 +2,7 @@ server:
   url: https://dbops.example.com
 agent:
   id: auto
+  # advertise_ip: 10.10.1.25 # Explicit database/replication address on multi-interface hosts
   heartbeat_seconds: 30
   work_dir: /var/lib/dbops-agent
   log_dir: /var/log/dbops-agent

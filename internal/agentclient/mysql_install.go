@@ -267,7 +267,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		}
 		// init_file runs account hardening before MySQL accepts connections.
 		bootstrapSQL := filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql")
-		sqlText := "ALTER USER 'root'@'localhost' IDENTIFIED BY '" + p.RootPassword + "';\n"
+		sqlText := "SET SESSION sql_log_bin=0;\nALTER USER 'root'@'localhost' IDENTIFIED BY '" + p.RootPassword + "';\n"
 		if err := writeNewFile(bootstrapSQL, []byte(sqlText), 0600); err != nil {
 			return nil, err
 		}

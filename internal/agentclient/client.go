@@ -92,7 +92,7 @@ func (c *Client) runOnce(ctx context.Context) error {
 		AgentUUID:       c.agentID,
 		Version:         Version,
 		Hostname:        hostname,
-		IPAddress:       primaryIP(),
+		IPAddress:       c.advertiseIP(),
 		Architecture:    runtime.GOARCH,
 		ProtocolVersion: agentproto.ProtocolVersion,
 		Auth: agentproto.Auth{
@@ -302,4 +302,11 @@ func isControlAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func (c *Client) advertiseIP() string {
+	if c.cfg.Agent.AdvertiseIP != "" {
+		return c.cfg.Agent.AdvertiseIP
+	}
+	return primaryIP()
 }

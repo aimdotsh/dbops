@@ -2,6 +2,7 @@ package agentclient
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 
@@ -15,6 +16,7 @@ type Config struct {
 	} `yaml:"server"`
 	Agent struct {
 		ID               string `yaml:"id"`
+		AdvertiseIP      string `yaml:"advertise_ip"`
 		HeartbeatSeconds int    `yaml:"heartbeat_seconds"`
 		WorkDir          string `yaml:"work_dir"`
 		LogDir           string `yaml:"log_dir"`
@@ -49,6 +51,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	if err := yaml.Unmarshal(b, &cfg); err != nil {
 		return cfg, err
+	}
+	if cfg.Agent.AdvertiseIP != "" && net.ParseIP(cfg.Agent.AdvertiseIP) == nil {
+		return cfg, fmt.Errorf("agent.advertise_ip must be a valid IP address")
 	}
 	if cfg.Server.URL == "" {
 		return cfg, fmt.Errorf("server.url is required")
