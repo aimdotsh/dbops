@@ -13,7 +13,7 @@
 | MySQL 双机 systemd/GTID | clp01 与 clp02（Ubuntu 24.04 ARM64）使用独立目录和服务名完成 MySQL 8.0.46 安装；手工一致基线后创建 GTID 复制，IO/SQL 线程 Yes、延迟 0；主库新增记录在从库可见；从库 systemd 重启后复制仍为健康 |
 | 安装布局与迁移 | 根目录默认 `/opt/dbops`，实例位于 `mysql/<port>`，服务名 `dbops-mysql<port>.service`；自定义根目录、逐项路径覆盖和服务后缀规范化测试通过。clp01/clp02 的 13307 实例已冷复制迁移到新目录，UUID 和数据保持不变，旧目录和迁移前元数据库快照保留 |
 | 真实故障恢复与备份恢复 | 暂停从库 SQL 线程，刷新状态显示 degraded；主库插入记录后从库暂不可见，恢复线程后成功追赶。平台重启任务 22 成功；默认布局安装 13309（任务 24）、显式用户库备份（25）、同 Agent 空实例恢复（26）成功，三条测试记录逐条一致 |
-| XtraBackup 物理基线 | 官方 Percona `8.0.35-36-1.noble_arm64` 包在两台 ARM64 主机解包验证；clp01 对 13307 完成在线备份和 `--prepare`，传输到 clp02 后 `--copy-back` 恢复至 13311，systemd 启动并核对六条记录一致；平台任务 42/43 已在双机通过 Agent executor 生成物理备份并登记全文件清单摘要 |
+| XtraBackup 物理基线 | 官方 Percona `8.0.35-36-1.noble_arm64` 包在两台 ARM64 主机解包验证；clp01 对 13307 完成在线备份和 `--prepare`，传输到 clp02 后 `--copy-back` 恢复至 13311，systemd 启动并核对六条记录一致；平台任务 42/45 已在双机生成全文件摘要备份；任务 44/46 完成 prepare 与暂存 copy-back，等待人工切换（旧任务 43 摘要未覆盖全文件，已更正） |
 | 恢复范围限制 | 拒绝 all_databases、MySQL 系统 schema 和未知备份范围；只允许显式用户库进入运行时检查 |
 | 任务可靠性 | 并发领取唯一性、所有权完成、续租、停机中断、过期恢复，以及周期备份提交后宕机的幂等测试通过 |
 | 平台快照 | WAL 数据保存、完整性与摘要校验、恢复到新目录、拒绝已有目标、拒绝篡改通过 |
@@ -33,7 +33,7 @@
 以下项目尚不能标记为“完整 V1.0 已完成”：
 
 - systemd 已完成 Ubuntu 24.04 ARM64 双机安装、迁移、重启及复制 SQL 线程中断恢复；尚未覆盖整机断电、网络分区、自动故障切换或完整生产负载。
-- 复制基线已完成一次真实 XtraBackup 生成、传输、prepare 和恢复验收；平台复制创建流程仍要求 `baseline_ready=true`，物理备份任务已接入 Agent executor，物理恢复保留人工核查流程。
+- 复制基线已完成一次真实 XtraBackup 生成、传输、prepare 和恢复验收；平台复制创建流程仍要求 `baseline_ready=true`，物理备份任务已接入 Agent executor，物理恢复已自动完成副本校验、prepare 和暂存 copy-back，最终切换保留人工核查流程。
 - PostgreSQL 物理备份/恢复、Doris 恢复、Oracle RMAN 灾难恢复演练；已有逻辑/快照/RMAN 备份控制链路不等于恢复验收。
 - 真实 Oracle、PostgreSQL、Doris 集群的兼容性、权限、性能、故障场景验收；需专用实例、对应客户端工具和可操作的测试数据。
 - 对象存储/远程备份传输与生命周期管理；当前 MySQL 文件位于 Agent、本平台快照位于 Server。

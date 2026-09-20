@@ -52,7 +52,7 @@ Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x�
 
 ## 下一项计划与环境阻塞
 
-官方 Percona `percona-xtrabackup-80_8.0.35-36-1.noble_arm64.deb` 已解包到两台 ARM64 主机，并用 `/opt/dbops-acceptance-20260920/pxb-stage-36/usr/bin/xtrabackup` 完成在线备份和 `--prepare`。随后将备份传输到 clp02，通过 `--copy-back` 恢复到实例 7（端口 13311），启动 `dbops-mysql13311.service` 并核对六条测试记录一致。平台任务 41 进一步调用新的 `mysql.xtrabackup.backup` Agent executor，在实例 3（端口 13307）成功生成 `/opt/dbops-acceptance-20260920/pxb-api-backups/api-physical-20260920`，登记为 `backup_job_id=7`、`backup_type=physical`、大小 `74086024` 字节、checksum `3b2f4b721bfaba4b6462954676a34b74a713ad900e08bbccd2730247ab6ba0b6`。物理恢复暂按人工核查流程执行，平台自动恢复接口仍仅接受 mysqldump 逻辑备份。
+官方 Percona `percona-xtrabackup-80_8.0.35-36-1.noble_arm64.deb` 已解包到两台 ARM64 主机，并用 `/opt/dbops-acceptance-20260920/pxb-stage-36/usr/bin/xtrabackup` 完成在线备份和 `--prepare`。随后将备份传输到 clp02，通过 `--copy-back` 恢复到实例 7（端口 13311），启动 `dbops-mysql13311.service` 并核对六条测试记录一致。平台任务 41 进一步调用新的 `mysql.xtrabackup.backup` Agent executor，在实例 3（端口 13307）成功生成 `/opt/dbops-acceptance-20260920/pxb-api-backups/api-physical-20260920`，登记为 `backup_job_id=7`、`backup_type=physical`、大小 `74086024` 字节、checksum `3b2f4b721bfaba4b6462954676a34b74a713ad900e08bbccd2730247ab6ba0b6`。本轮后续已增加物理恢复暂存接口，最终切换仍按人工核查流程执行。
 
 ## 平台正常重启与人工核查
 
@@ -79,4 +79,11 @@ Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x�
 
 ### 平台物理备份双机复验
 
-任务 42（clp01，实例 3）与任务 43（clp02，实例 2）均成功，备份记录分别为 8、9，大小分别为 74,086,031 和 74,087,311 字节。此轮升级为全部文件的 `sorted-file-manifest-v1` 摘要，替代任务 41 仅覆盖 checkpoint 的早期摘要。两份摘要分别为 `484d20029afda2912f3457da2f08236f2a90e695bbfb92e98392d9dbb7f77411`、`c12aecb302cb8a404865971e1be511ff5af8fc594c50ddcb77a54a5ae57353f6`。完成后复制 IO/SQL 线程均为 Yes、延迟 0、状态 healthy。Go 全量测试和前端构建通过，新增测试覆盖同长度数据变更、文件重命名、符号链接拒绝与校验取消。
+任务 42（clp01，实例 3）与任务 43（clp02，实例 2）均成功，备份记录分别为 8、9，大小分别为 74,086,031 和 74,087,311 字节。核查更正：任务 42 使用全部文件的 `sorted-file-manifest-v1` 摘要；任务 43 的 clp02 Agent 仍为旧摘要实现，备份 9 未包含 checksum_scope，不能作为全文件校验验收证据。任务 41 同样只覆盖 checkpoint。两份摘要分别为 `484d20029afda2912f3457da2f08236f2a90e695bbfb92e98392d9dbb7f77411`、`c12aecb302cb8a404865971e1be511ff5af8fc594c50ddcb77a54a5ae57353f6`。完成后复制 IO/SQL 线程均为 Yes、延迟 0、状态 healthy。Go 全量测试和前端构建通过，新增测试覆盖同长度数据变更、文件重命名、符号链接拒绝与校验取消。
+
+### 物理恢复暂存验收
+
+- clp01：任务 44 使用备份 8，校验私有副本、prepare、copy-back 到 `physical-recovery-3674517005/data` 成功；原备份仍为 full-backuped，副本为 full-prepared，目标实例 5 的记录未变，13307/13310 服务 active。
+- clp02：直连 SSH 超时后，经 clp01 内网跳转并使用原有主机密钥校验完成 Agent 升级。恢复入口拒绝缺少全文件摘要标识的旧备份 9。任务 45 重新生成备份 10，任务 46 prepare/copy-back 到 `physical-recovery-2300873410/data` 成功，摘要为 `b685e778d8157e38f08bcfbf91355b9c8d2c8a9232f40038f93331dfb6ad5c8a`。
+- 两项恢复结果均为 awaiting_manual_activation、restored=false，未执行停库和目录切换。暂存目录位于各 Agent 的 `/opt/dbops-acceptance-20260920/agent-data/`。完成后复制 healthy，IO/SQL Yes，延迟 0。
+- 本轮验证的是平台暂存恢复，不等同于目标数据库已经切换。既有 13311 手工启动恢复验收独立保留。人工切换、核查、回退及中断清理流程见 operations.md。

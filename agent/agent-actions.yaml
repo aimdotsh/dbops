@@ -67,6 +67,9 @@ actions:
   - name: mysql.restore
     timeout: 86400
     risk: R4
+  - name: mysql.xtrabackup.restore
+    timeout: 86400
+    risk: R4
   - name: mysql.archive.precheck
     timeout: 600
     risk: R0

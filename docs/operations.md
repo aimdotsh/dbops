@@ -42,7 +42,7 @@ SuperAdmin 在“操作中心”创建项目、环境和用户；分配主机的
 
 ## MySQL 安装与恢复
 
-软件仓库现在可保存并下载目标架构匹配的 MySQL tar.gz，以及 Percona XtraBackup ARM64/AMD64 `.deb` 包。MySQL 安装器只接受二进制 tar.gz/tgz；`.deb` 包需先在目标主机安装或解包，Agent 物理备份动作使用其中的可执行文件，不会被 MySQL 安装器误安装。`POST /mysql/instances/:id/backups` 的 `engine` 可选 `mysqldump`（默认，逻辑备份）或 `xtrabackup`（物理备份），物理备份同时传入 Agent 上的 `tool_path`、`output_dir`，可选 `file_name` 作为备份目录名；动作会返回未 prepare 的物理目录，恢复仍需按人工核查流程执行 `--prepare`/`--copy-back`。选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。
+软件仓库现在可保存并下载目标架构匹配的 MySQL tar.gz，以及 Percona XtraBackup ARM64/AMD64 `.deb` 包。MySQL 安装器只接受二进制 tar.gz/tgz；`.deb` 包需先在目标主机安装或解包，Agent 物理备份动作使用其中的可执行文件，不会被 MySQL 安装器误安装。`POST /mysql/instances/:id/backups` 的 `engine` 可选 `mysqldump`（默认，逻辑备份）或 `xtrabackup`（物理备份），物理备份同时传入 Agent 上的 `tool_path`、`output_dir`，可选 `file_name` 作为备份目录名；动作会返回未 prepare 的物理目录，恢复接口可完成副本校验、`--prepare` 和暂存 `--copy-back`，最终切换需人工核查。选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。
 
 GTID 复制配置要求操作者已完成一致基线准备，并明确确认 baseline_ready。当前流程不自动传输或还原基线，不代表支持一键从任意已有数据建立复制。
 
@@ -88,3 +88,19 @@ notifications:
 Webhook 使用 Bearer token；SMTP 要求 STARTTLS。失败进入持久重试队列，按指数间隔重试。告警可确认或临时静默；这不是完整的告警维护窗口/抑制规则系统。
 
 物理备份摘要使用 `sorted-file-manifest-v1`：按相对路径排序，对每个普通文件的路径、大小和完整 SHA256 生成清单摘要；不接受符号链接。应在 prepare 前校验原始备份，prepare 会改变文件。
+
+## MySQL 物理恢复暂存与人工切换
+
+`POST /mysql/restores` 接受 XtraBackup 备份的 `backup_id`、同 Agent 同版本的不同 `target_instance_id`、`confirmed=true` 和可选 `tool_path`。仅接受含 `checksum_scope=sorted-file-manifest-v1` 的完整物理备份；旧 checkpoint 摘要不能用于恢复。平台复制原备份到私有目录，校验全部文件，再 prepare 和 copy-back 到独立 data 暂存目录。原备份和运行中的目标均不改变。
+
+任务成功仅表示暂存成功。结果必须显示 `stage=awaiting_manual_activation`、`restored=false`、`manual_review_required=true`；任务中的 `MANUAL_ACTIVATION_REQUIRED` 步骤保持 pending，不会自动推进。此步骤是人工交接记录，当前没有自动切换或人工完成按钮。操作者在维护记录中保存最终核查证据。
+
+人工交接流程：
+
+1. 核对备份来源、目标版本、暂存路径和 prepared checkpoint，检查磁盘容量、文件所有权、外部表空间路径及目标配置。备份内账号来自备份时刻，目标原密码可能失效，需先准备可用凭据及平台凭据同步方案。
+2. 确认业务隔离和维护窗口，停止目标服务；确认端口关闭、进程退出。保留原 datadir 及相关配置、binlog/relay log，不删除或覆盖回退数据。
+3. 将暂存 data 复制到新的目标目录，按目标系统用户设置权限。副本场景核查并重新生成唯一 server_uuid、设置不同 server_id，禁用自动启动旧复制；源端 GTID/binlog 位点须另行核实，不能直接沿用历史复制信息。
+4. 切换到新数据目录后启动隔离目标，核对端口、UUID、GTID、库表及抽样行数据。完成账号与平台凭据核对后再恢复业务连接，复制另按基线流程建立。
+5. 若核对失败，停止目标并保留新目录供排查，再切回保留的原目录和配置；不要自动删除失败现场或重试覆盖。成功验收后才按保留策略清理暂存与回退目录。
+
+Agent/Server 中断时按“中断任务”流程核查，暂存目录可能残留。先确认没有 prepare/copy-back 进程，再决定保留或清理。平台不会在重启后自动激活数据。逻辑恢复仍要求无用户库目标；物理暂存不会修改所选目标，最终人工切换前必须重新检查目标数据和使用状态。

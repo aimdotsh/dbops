@@ -112,6 +112,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlServiceAction(ctx, req.Action, req.Params)
 	case "mysql.restore":
 		return mysqlRestore(ctx, e.workDir, req.Params)
+	case "mysql.xtrabackup.restore":
+		return mysqlPhysicalRestore(ctx, e.workDir, req.Params)
 	case "mysql.backup":
 		return mysqlBackup(ctx, e.workDir, req.Params)
 	case "mysql.xtrabackup.backup":

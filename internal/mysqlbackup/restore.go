@@ -11,9 +11,10 @@ import (
 )
 
 type RestoreRequest struct {
-	BackupID         int64 `json:"backup_id"`
-	TargetInstanceID int64 `json:"target_instance_id"`
-	Confirmed        bool  `json:"confirmed"`
+	BackupID         int64  `json:"backup_id"`
+	TargetInstanceID int64  `json:"target_instance_id"`
+	Confirmed        bool   `json:"confirmed"`
+	ToolPath         string `json:"tool_path,omitempty"`
 }
 
 func (s *Service) validateRestore(ctx context.Context, req RestoreRequest) (domain.BackupJob, runtime, error) {
@@ -24,8 +25,8 @@ func (s *Service) validateRestore(ctx context.Context, req RestoreRequest) (doma
 	if err != nil {
 		return backup, runtime{}, err
 	}
-	if backup.Status != "success" || backup.BackupEngine != "mysqldump" || backup.DatabaseInstanceID == req.TargetInstanceID {
-		return backup, runtime{}, errors.New("select a successful logical backup and a different empty target")
+	if backup.Status != "success" || (backup.BackupEngine != "mysqldump" && backup.BackupEngine != "xtrabackup") || backup.DatabaseInstanceID == req.TargetInstanceID {
+		return backup, runtime{}, errors.New("select a successful supported backup and a different target")
 	}
 	backupTask, err := s.tasks.Get(ctx, backup.TaskID)
 	if err != nil {
@@ -35,13 +36,22 @@ func (s *Service) validateRestore(ctx context.Context, req RestoreRequest) (doma
 	if err = json.Unmarshal([]byte(backupTask.ParametersJSON), &scope); err != nil {
 		return backup, runtime{}, err
 	}
-	if scope.AllDatabases || len(scope.Databases) == 0 {
-		return backup, runtime{}, errors.New("automated restore requires an explicit user-database backup; system schemas need manual recovery")
-	}
-	for _, name := range scope.Databases {
-		switch strings.ToLower(name) {
-		case "mysql", "sys", "information_schema", "performance_schema":
-			return backup, runtime{}, errors.New("automated restore cannot overwrite system schemas")
+	if backup.BackupEngine == "mysqldump" {
+		if scope.AllDatabases || len(scope.Databases) == 0 {
+			return backup, runtime{}, errors.New("automated restore requires an explicit user-database backup; system schemas need manual recovery")
+		}
+		for _, name := range scope.Databases {
+			switch strings.ToLower(name) {
+			case "mysql", "sys", "information_schema", "performance_schema":
+				return backup, runtime{}, errors.New("automated restore cannot overwrite system schemas")
+			}
+		}
+	} else {
+		var meta struct {
+			ChecksumScope string `json:"checksum_scope"`
+		}
+		if err := json.Unmarshal([]byte(backup.MetadataJSON), &meta); err != nil || meta.ChecksumScope != "sorted-file-manifest-v1" {
+			return backup, runtime{}, errors.New("physical restore requires a full-file manifest backup")
 		}
 	}
 	source, err := s.loadRuntime(ctx, backup.DatabaseInstanceID)
@@ -82,13 +92,30 @@ func (s *Service) RestoreHandler() func(context.Context, domain.Task) (any, erro
 		if err = s.tasks.UpsertStep(ctx, domain.TaskStep{TaskID: t.ID, StepNo: 1, StepCode: "RESTORE_PRECHECK", StepName: "Verify backup, target version and host", Status: "success", Progress: 10, RecoveryPolicy: "manual"}); err != nil {
 			return nil, err
 		}
-		resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{Action: "mysql.restore", Risk: "R4", Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400, Params: map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password, "backup_path": backup.StoragePath, "sha256": backup.Checksum}})
+		action := "mysql.restore"
+		params := map[string]any{"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password, "backup_path": backup.StoragePath, "sha256": backup.Checksum}
+		if backup.BackupEngine == "xtrabackup" {
+			action = "mysql.xtrabackup.restore"
+			params = map[string]any{"backup_path": backup.StoragePath, "sha256": backup.Checksum, "checksum_scope": "sorted-file-manifest-v1", "xtrabackup_bin": req.ToolPath}
+		}
+		resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{Action: action, Risk: "R4", Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400, Params: params})
 		status, message := "success", ""
+		stepName := "Checksum, empty-target check, restore and verify"
+		if backup.BackupEngine == "xtrabackup" {
+			stepName = "Verify private copy, prepare and copy-back to staging"
+		}
 		if err != nil {
 			status, message = "failed", err.Error()
 		}
-		if stepErr := s.tasks.UpsertStep(ctx, domain.TaskStep{TaskID: t.ID, StepNo: 2, StepCode: "MYSQL_RESTORE", StepName: "Checksum, empty-target check, restore and verify", Status: status, Progress: 100, ErrorMessage: message, RecoveryPolicy: "manual"}); stepErr != nil && err == nil {
+		if stepErr := s.tasks.UpsertStep(ctx, domain.TaskStep{TaskID: t.ID, StepNo: 2, StepCode: "MYSQL_RESTORE", StepName: stepName, Status: status, Progress: 100, ErrorMessage: message, RecoveryPolicy: "manual"}); stepErr != nil && err == nil {
 			err = stepErr
+		}
+		if err == nil && backup.BackupEngine == "xtrabackup" {
+			payload, marshalErr := json.Marshal(resp.Result)
+			if marshalErr != nil {
+				return nil, marshalErr
+			}
+			err = s.tasks.UpsertStep(ctx, domain.TaskStep{TaskID: t.ID, StepNo: 3, StepCode: "MANUAL_ACTIVATION_REQUIRED", StepName: "Staged only: inspect and activate target manually", Status: "pending", Progress: 0, OutputJSON: string(payload), RecoveryPolicy: "manual"})
 		}
 		return resp.Result, err
 	}
