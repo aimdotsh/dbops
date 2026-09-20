@@ -150,6 +150,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	mysqlBackup := mysqlbackup.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
 	mysqlBackup.SetInstaller(mysqlInstaller)
 	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archivePolicyRepo, archiveRepo, taskRepo, cipher, gateway)
+	mysqlArchive.SetReplications(replicationRepo)
 
 	mysqlReplication := mysqlreplication.New(
 		hostRepo,

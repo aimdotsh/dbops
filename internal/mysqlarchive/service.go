@@ -21,15 +21,18 @@ type AgentDispatcher interface {
 }
 
 type Service struct {
-	agents      repository.AgentRepository
-	dbs         repository.DatabaseRepository
-	credentials repository.CredentialRepository
-	policies    repository.ArchivePolicyRepository
-	jobs        repository.ArchiveJobRepository
-	tasks       repository.TaskRepository
-	cipher      *security.Cipher
-	dispatcher  AgentDispatcher
+	agents       repository.AgentRepository
+	dbs          repository.DatabaseRepository
+	credentials  repository.CredentialRepository
+	policies     repository.ArchivePolicyRepository
+	jobs         repository.ArchiveJobRepository
+	tasks        repository.TaskRepository
+	cipher       *security.Cipher
+	dispatcher   AgentDispatcher
+	replications repository.MySQLReplicationRepository
 }
+
+func (s *Service) SetReplications(repo repository.MySQLReplicationRepository) { s.replications = repo }
 
 type PolicyRequest struct {
 	Name                  string `json:"name"`
@@ -303,16 +306,55 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 			TaskID: t.ID, StepNo: 1, StepCode: "ARCHIVE_PRECHECK", StepName: "Archive precheck and dry-run",
 			Status: "success", Progress: 20, OutputJSON: security.RedactJSON(string(prePayload)), RecoveryPolicy: "verify_before_retry",
 		})
+		lagProbe, err := s.archiveLagProbe(ctx, p)
+		if err == nil && lagProbe != nil {
+			probeCtx, stop := context.WithTimeout(ctx, 15*time.Second)
+			err = lagProbe(probeCtx)
+			stop()
+		}
+		if err != nil {
+			_ = s.jobs.UpdateState(ctx, job.ID, "failed", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
+			return nil, fmt.Errorf("archive replication protection: %w", err)
+		}
 
 		_ = s.jobs.UpdateState(ctx, job.ID, "running", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, "", "")
 		startPolicy, _ := actionpolicy.Get("mysql.archive.start")
 		confirmed := tp.Confirmed || tp.Mode == "resume"
+		monitorCtx, cancelMonitor := context.WithCancel(ctx)
+		lagFailures := make(chan error, 1)
+		monitorDone := make(chan struct{})
+		stopArchiver := func(stopCtx context.Context) error {
+			_, stopErr := s.dispatcher.Dispatch(stopCtx, source.Agent.ID, agentproto.ActionRequest{
+				TaskID: 0, Action: "mysql.archive.stop", Risk: "R3", Confirmed: true,
+				ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 15,
+				Params: map[string]any{"archive_job_id": job.ID},
+			})
+			return stopErr
+		}
+		go func() {
+			defer close(monitorDone)
+			watchArchiveLag(monitorCtx, lagProbe, stopArchiver, lagFailures)
+		}()
 		resp, err := s.dispatcher.Dispatch(ctx, source.Agent.ID, agentproto.ActionRequest{
 			TaskID: 0, Action: "mysql.archive.start", Risk: string(startPolicy.Risk), Confirmed: confirmed,
 			ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400, Params: actionParams,
 		})
+		cancelMonitor()
+		<-monitorDone
+		select {
+		case monitorErr := <-lagFailures:
+			err = fmt.Errorf("archive stopped by replication protection: %w", monitorErr)
+		default:
+		}
 		if err != nil {
-			_ = s.jobs.UpdateState(ctx, job.ID, "failed", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
+			scanned, archived, deleted, failed := job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows
+			if partial, ok := resp.Result.(map[string]any); ok {
+				scanned += number(partial["scanned_rows"])
+				archived += number(partial["archived_rows"])
+				deleted += number(partial["deleted_rows"])
+				failed += number(partial["failed_rows"])
+			}
+			_ = s.jobs.UpdateState(ctx, job.ID, "failed", scanned, archived, deleted, failed, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
 			_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 				TaskID: t.ID, StepNo: 2, StepCode: "PT_ARCHIVER", StepName: "Run pt-archiver",
 				Status: "failed", Progress: 70, ErrorMessage: err.Error(), RecoveryPolicy: "manual_on_unknown",
@@ -450,8 +492,8 @@ func (s *Service) normalizePolicy(ctx context.Context, req PolicyRequest) (domai
 	if req.SleepMS < 0 {
 		return domain.ArchivePolicy{}, errors.New("sleep_ms cannot be negative")
 	}
-	if req.MaxReplicationLag <= 0 {
-		req.MaxReplicationLag = 30
+	if req.MaxReplicationLag < 0 || req.MaxThreadsRunning < 0 {
+		return domain.ArchivePolicy{}, errors.New("load protection thresholds cannot be negative")
 	}
 	if req.PTArchiverPath == "" || !filepath.IsAbs(req.PTArchiverPath) || filepath.Clean(req.PTArchiverPath) == "/" {
 		return domain.ArchivePolicy{}, errors.New("pt_archiver_path must be an absolute path")

@@ -6,6 +6,15 @@
 |---|---|---|
 | POST /mysql/precheck | agent_id 与预检参数，创建只读任务 | DBA / SuperAdmin |
 | POST /mysql/restores | backup_id、target_instance_id、confirmed:true | DBA / SuperAdmin |
+| POST /mysql/restores/new-host | backup_id、agent_id、package_id、name、port；可选 tool_path 和安装布局，无需 confirmed | DBA / SuperAdmin |
+| GET /mysql/backups | 列出逻辑/物理备份与校验信息 | 授权资源读权限 |
+| GET/POST /mysql/archive/policies | 列出/创建归档策略；POST 需源实例、表、条件、目标、pt_archiver_path 等 | 读 / DBA / SuperAdmin |
+| POST /mysql/archive/policies/:id/precheck | 主键、目标与 pt-archiver dry-run 预检 | DBA / SuperAdmin |
+| POST /mysql/archive/policies/:id/start | confirmed:true，创建归档作业任务 | DBA / SuperAdmin |
+| GET /mysql/archive/jobs | 列出作业，可按 policy_id 过滤 | 授权资源读权限 |
+| POST /mysql/archive/jobs/:id/pause | 暂停运行中的作业 | Operator / DBA / SuperAdmin |
+| POST /mysql/archive/jobs/:id/resume | 续跑 paused/interrupted 作业 | Operator / DBA / SuperAdmin |
+| POST /mysql/archive/jobs/:id/stop | confirmed:true，停止运行中的作业 | DBA / SuperAdmin |
 | GET /platform/backups | 列出平台快照 | SuperAdmin |
 | POST /platform/backups | 创建平台快照任务 | SuperAdmin |
 | GET /backup-schedules | 列出固定间隔计划 | SuperAdmin |
