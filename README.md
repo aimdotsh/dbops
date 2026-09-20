@@ -6,13 +6,41 @@
 
 - JWT 登录、角色权限、项目与环境组合授权、操作审计；Agent 注册凭据、TLS/mTLS 和动作白名单。
 - 持久化任务、原子领取、租约续期、过期任务中断、人工核查解除；同主机操作串行。
-- MySQL 软件上传、预检、安装、启停、GTID 复制配置、逻辑备份与受限恢复、pt-archiver 作业控制。
+- MySQL 软件上传、预检、安装、启停、GTID 复制配置、mysqldump 逻辑备份、XtraBackup 物理备份与恢复、pt-archiver 作业控制。
 - Oracle 接入、状态、Data Guard、表空间/数据文件与 RMAN；PostgreSQL 接入、状态、复制状态与 pg_dump；Doris 接入、状态与快照备份。
 - 资产、操作表单、软件仓库、任务详情、指标图表、告警确认/静默、业务记录及定时备份页面。
 - 主机/数据库指标、分层聚合和保留策略；告警 Webhook/SMTP 重试队列；固定间隔备份计划。
 - 平台 SQLite 在线快照、校验清单，以及只允许恢复到新目录的离线工具。
 
 实现与验收范围见 [验收记录](docs/acceptance.md)。完整设计是目标说明，不能视为所有条目已经实现或通过真实数据库验收。
+
+## MySQL 备份与恢复
+
+MySQL 备份可选择 `mysqldump` 或 `xtrabackup`。物理备份需在 Agent 主机上安装或解包兼容的 XtraBackup，并在请求中指定 `tool_path`（默认 `/usr/bin/xtrabackup`）。备份记录包含引擎、路径、大小和校验摘要；物理备份的全文件摘要在 prepare 前校验。
+
+- **原主机恢复**：`POST /api/v1/mysql/restores` 要求 `confirmed=true`。逻辑恢复只导入显式指定的用户库，目标须是同 Agent、同版本且无业务库的另一实例。物理恢复完成私有副本校验、prepare 和暂存 copy-back，返回 `awaiting_manual_activation`；运行中实例的最终切换与核查由 DBA 执行。
+- **新主机恢复**：`POST /api/v1/mysql/restores/new-host` 选择备份、另一台在线 Agent、同版本 MySQL 软件包、实例名和端口，无需 `confirmed`。平台通过认证的 Agent 连接传输并校验备份，自动创建独立目录与服务、恢复数据、启动新库、登记加密凭据，结果返回实例 ID、主机 ID、端口和状态。逻辑与物理备份均支持；物理恢复会生成新 UUID 和 server_id，并清除旧复制通道。
+
+新主机恢复示例（ID 和端口需替换为环境中的可用值）：
+
+```json
+{
+  "backup_id": 8,
+  "agent_id": 2,
+  "package_id": 2,
+  "name": "restored-mysql",
+  "port": 13313,
+  "tool_path": "/usr/bin/xtrabackup"
+}
+```
+
+真实环境中，clp01 的逻辑备份与物理备份分别自动恢复为 clp02 的 13312、13313 新实例：六条记录一致，两个实例重启成功，原主从复制保持健康。原主机缺少确认的请求，以及借新主机入口把备份恢复到源主机的请求，均被拒绝。详情见 [双机验收报告](docs/real-environment-acceptance-20260920.md) 和 [运维与恢复流程](docs/operations.md)。
+
+## 当前仍待完成
+
+- GTID 复制仍需操作者确认一致数据基线；自动复制基线编排与自动故障切换尚未实现。
+- 原主机物理恢复的最终目录切换仍需人工核查。新主机自动恢复要求来源 Agent 在线、目标为不同主机上的全新实例；不支持已有实例覆盖、跨 MySQL 版本或离线对象存储取回。
+- Oracle、PostgreSQL、Doris 的专用真实环境与恢复演练，以及整机断电、网络分区和生产负载场景尚未验收。对象存储、完整平台灾备、归档一致性与更完整的指标告警仍是后续设计项。
 
 ## MySQL 安装目录与服务名称
 
