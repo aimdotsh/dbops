@@ -109,9 +109,12 @@ func mysqlReplicationStatus(ctx context.Context, params map[string]any) (map[str
 	if len(values) == 0 {
 		return map[string]any{"configured": false, "status": "not_configured"}, nil
 	}
-	lag := int64(0)
+	var lag any
 	if v := values["Seconds_Behind_Source"]; v != "" && !strings.EqualFold(v, "NULL") {
-		lag, _ = strconv.ParseInt(v, 10, 64)
+		parsed, parseErr := strconv.ParseInt(v, 10, 64)
+		if parseErr == nil {
+			lag = parsed
+		}
 	}
 	ioRunning := values["Replica_IO_Running"]
 	sqlRunning := values["Replica_SQL_Running"]

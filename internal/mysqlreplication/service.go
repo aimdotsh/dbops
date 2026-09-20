@@ -211,12 +211,12 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, fmt.Errorf("replication is not healthy: %v", status)
 		}
 
-		lag := int64Value(status["replication_lag_seconds"])
+		lag := optionalInt64(status["replication_lag_seconds"])
 		rec, err := s.replications.Create(ctx, domain.MySQLReplication{
 			PrimaryInstanceID: p.PrimaryInstanceID, ReplicaInstanceID: p.ReplicaInstanceID,
 			ReplicationCredentialID: &credential.ID, GTIDEnabled: true,
 			IOThreadStatus: stringValue(status["io_thread_status"]), SQLThreadStatus: stringValue(status["sql_thread_status"]),
-			ReplicationLagSeconds: &lag, SourceUUID: stringValue(status["source_uuid"]), Status: "healthy",
+			ReplicationLagSeconds: lag, SourceUUID: stringValue(status["source_uuid"]), Status: "healthy",
 		})
 		if err != nil {
 			return nil, err
@@ -244,10 +244,10 @@ func (s *Service) Refresh(ctx context.Context, id int64) (domain.MySQLReplicatio
 	if err != nil {
 		return rec, err
 	}
-	lag := int64Value(status["replication_lag_seconds"])
+	lag := optionalInt64(status["replication_lag_seconds"])
 	rec.IOThreadStatus = stringValue(status["io_thread_status"])
 	rec.SQLThreadStatus = stringValue(status["sql_thread_status"])
-	rec.ReplicationLagSeconds = &lag
+	rec.ReplicationLagSeconds = lag
 	rec.SourceUUID = stringValue(status["source_uuid"])
 	rec.LastIOError = stringValue(status["last_io_error"])
 	rec.LastSQLError = stringValue(status["last_sql_error"])
@@ -344,4 +344,13 @@ func int64Value(v any) int64 {
 		return n
 	}
 	return 0
+}
+
+func optionalInt64(v any) *int64 {
+	switch v.(type) {
+	case nil:
+		return nil
+	}
+	x := int64Value(v)
+	return &x
 }

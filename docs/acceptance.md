@@ -33,6 +33,7 @@
 
 - systemd 已完成 Ubuntu 24.04 ARM64 双机安装、迁移、重启及复制 SQL 线程中断恢复；尚未覆盖整机断电、网络分区、自动故障切换或完整生产负载。
 - 复制的一致基线自动生成/传输/还原、XtraBackup 物理备份和物理恢复；当前复制配置依赖人工准备基线。
+- XtraBackup 环境检查已完成：clp01/clp02 为 ARM64，均无 xtrabackup/mariabackup，系统仓库无可用 `percona-xtrabackup-80`；需提供 ARM64 兼容工具包后再验收物理基线。
 - PostgreSQL 物理备份/恢复、Doris 恢复、Oracle RMAN 灾难恢复演练；已有逻辑/快照/RMAN 备份控制链路不等于恢复验收。
 - 真实 Oracle、PostgreSQL、Doris 集群的兼容性、权限、性能、故障场景验收；需专用实例、对应客户端工具和可操作的测试数据。
 - 对象存储/远程备份传输与生命周期管理；当前 MySQL 文件位于 Agent、本平台快照位于 Server。
