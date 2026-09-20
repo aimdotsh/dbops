@@ -31,6 +31,8 @@ type Service struct {
 
 type CreateRequest struct {
 	InstanceID   int64    `json:"instance_id"`
+	Engine       string   `json:"engine,omitempty"`
+	ToolPath     string   `json:"tool_path,omitempty"`
 	AllDatabases bool     `json:"all_databases"`
 	Databases    []string `json:"databases,omitempty"`
 	OutputDir    string   `json:"output_dir"`
@@ -39,6 +41,8 @@ type CreateRequest struct {
 
 type taskParams struct {
 	InstanceID   int64    `json:"instance_id"`
+	Engine       string   `json:"engine,omitempty"`
+	ToolPath     string   `json:"tool_path,omitempty"`
 	AllDatabases bool     `json:"all_databases"`
 	Databases    []string `json:"databases,omitempty"`
 	OutputDir    string   `json:"output_dir"`
@@ -66,6 +70,12 @@ func New(
 }
 
 func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Task, error) {
+	if req.Engine == "" {
+		req.Engine = "mysqldump"
+	}
+	if req.Engine != "mysqldump" && req.Engine != "xtrabackup" {
+		return domain.Task{}, errors.New("unsupported backup engine")
+	}
 	rt, err := s.loadRuntime(ctx, req.InstanceID)
 	if err != nil {
 		return domain.Task{}, err
@@ -73,7 +83,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	if rt.Agent.Status != "online" {
 		return domain.Task{}, errors.New("agent is offline")
 	}
-	if !req.AllDatabases && len(req.Databases) == 0 {
+	if req.Engine == "mysqldump" && !req.AllDatabases && len(req.Databases) == 0 {
 		return domain.Task{}, errors.New("databases is required when all_databases=false")
 	}
 	if req.OutputDir == "" {
@@ -92,7 +102,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	}
 
 	raw, _ := json.Marshal(taskParams(req))
-	key := fmt.Sprintf("mysql.backup:%d", req.InstanceID)
+	key := fmt.Sprintf("mysql.backup:%d:%s", req.InstanceID, req.Engine)
 	target := req.InstanceID
 	agentID := rt.Agent.ID
 	return s.tasks.Create(ctx, domain.Task{
@@ -116,9 +126,25 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
+		if p.Engine == "" {
+			p.Engine = "mysqldump"
+		}
+		if p.Engine != "mysqldump" && p.Engine != "xtrabackup" {
+			return nil, errors.New("unsupported backup engine")
+		}
+		backupType := "logical"
+		action := "mysql.backup"
+		stepCode := "MYSQLDUMP"
+		stepName := "Run mysqldump"
+		if p.Engine == "xtrabackup" {
+			backupType = "physical"
+			action = "mysql.xtrabackup.backup"
+			stepCode = "XTRABACKUP"
+			stepName = "Run XtraBackup"
+		}
 		job, err := s.backups.Create(ctx, domain.BackupJob{
 			TaskID: t.ID, DatabaseInstanceID: p.InstanceID,
-			BackupEngine: "mysqldump", BackupType: "logical", Status: "pending",
+			BackupEngine: p.Engine, BackupType: backupType, Status: "pending",
 		})
 		if err != nil {
 			return nil, err
@@ -126,23 +152,24 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		_ = s.backups.MarkRunning(ctx, job.ID)
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 1, StepCode: "BACKUP_PRECHECK", StepName: "Backup precheck",
-			Status: "success", Progress: 10, OutputJSON: `{"engine":"mysqldump"}`, RecoveryPolicy: "verify_before_retry",
+			Status: "success", Progress: 10, OutputJSON: fmt.Sprintf(`{"engine":%q}`, p.Engine), RecoveryPolicy: "verify_before_retry",
 		})
 
-		policy, _ := actionpolicy.Get("mysql.backup")
+		policy, _ := actionpolicy.Get(action)
 		resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{
-			TaskID: 0, Action: "mysql.backup", Risk: string(policy.Risk),
+			TaskID: 0, Action: action, Risk: string(policy.Risk),
 			ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400,
 			Params: map[string]any{
 				"base_dir": rt.BaseDir, "run_dir": rt.RunDir, "root_password": rt.Password,
 				"output_dir": p.OutputDir, "file_name": p.FileName,
 				"all_databases": p.AllDatabases, "databases": p.Databases,
+				"data_dir": rt.Instance.DataDir, "xtrabackup_bin": p.ToolPath,
 			},
 		})
 		if err != nil {
 			_ = s.backups.MarkFailed(ctx, job.ID, err.Error())
 			_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
-				TaskID: t.ID, StepNo: 2, StepCode: "MYSQLDUMP", StepName: "Run mysqldump",
+				TaskID: t.ID, StepNo: 2, StepCode: stepCode, StepName: stepName,
 				Status: "failed", Progress: 60, ErrorMessage: err.Error(), RecoveryPolicy: "safe_retry",
 			})
 			return nil, err
@@ -164,7 +191,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 		payload, _ := json.Marshal(result)
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
-			TaskID: t.ID, StepNo: 2, StepCode: "MYSQLDUMP", StepName: "Run mysqldump",
+			TaskID: t.ID, StepNo: 2, StepCode: stepCode, StepName: stepName,
 			Status: "success", Progress: 70, OutputJSON: security.RedactJSON(string(payload)), RecoveryPolicy: "safe_retry",
 		})
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
@@ -179,7 +206,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			Status: "success", Progress: 100, OutputJSON: fmt.Sprintf(`{"backup_job_id":%d}`, job.ID), RecoveryPolicy: "verify_before_retry",
 		})
 		return map[string]any{
-			"backup_job_id": job.ID, "engine": "mysqldump", "backup_type": "logical",
+			"backup_job_id": job.ID, "engine": p.Engine, "backup_type": backupType,
 			"path": path, "size_bytes": size, "sha256": checksum, "status": "success",
 		}, nil
 	}

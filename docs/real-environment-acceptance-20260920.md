@@ -52,7 +52,7 @@ Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x�
 
 ## 下一项计划与环境阻塞
 
-开发设计中的下一项物理基线/XtraBackup 验收暂不能在这两台真实主机执行：两台均为 `aarch64`，未安装 `xtrabackup`/`mariabackup`，系统仓库也没有可用的 `percona-xtrabackup-80` 包。当前已完成并验证的是 mysqldump 逻辑备份；待提供 ARM64 兼容的 XtraBackup 或 MySQL Shell 工具包后，再执行物理基线传输、prepare、恢复和复制创建验收。
+官方 Percona `percona-xtrabackup-80_8.0.35-36-1.noble_arm64.deb` 已解包到两台 ARM64 主机，并用 `/opt/dbops-acceptance-20260920/pxb-stage-36/usr/bin/xtrabackup` 完成在线备份和 `--prepare`。随后将备份传输到 clp02，通过 `--copy-back` 恢复到实例 7（端口 13311），启动 `dbops-mysql13311.service` 并核对六条测试记录一致。平台任务 41 进一步调用新的 `mysql.xtrabackup.backup` Agent executor，在实例 3（端口 13307）成功生成 `/opt/dbops-acceptance-20260920/pxb-api-backups/api-physical-20260920`，登记为 `backup_job_id=7`、`backup_type=physical`、大小 `74086024` 字节、checksum `3b2f4b721bfaba4b6462954676a34b74a713ad900e08bbccd2730247ab6ba0b6`。物理恢复暂按人工核查流程执行，平台自动恢复接口仍仅接受 mysqldump 逻辑备份。
 
 ## 平台正常重启与人工核查
 
@@ -76,3 +76,7 @@ Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x�
 ## 证据保管
 
 平台保留任务、备份记录及变更审计。开发机忽略目录 `.local-test/remote20260920/` 保存 `full-evidence.json` 和执行脚本，`.local-test/full-acceptance.log` 保存任务输出。凭据、私钥、运行数据库、二进制和原始日志不提交 Git。报告中的顺序以任务 ID 和实际观察为准；开发机与远端时钟有偏差，不能跨主机直接相减计算耗时。
+
+### 平台物理备份双机复验
+
+任务 42（clp01，实例 3）与任务 43（clp02，实例 2）均成功，备份记录分别为 8、9，大小分别为 74,086,031 和 74,087,311 字节。此轮升级为全部文件的 `sorted-file-manifest-v1` 摘要，替代任务 41 仅覆盖 checkpoint 的早期摘要。两份摘要分别为 `484d20029afda2912f3457da2f08236f2a90e695bbfb92e98392d9dbb7f77411`、`c12aecb302cb8a404865971e1be511ff5af8fc594c50ddcb77a54a5ae57353f6`。完成后复制 IO/SQL 线程均为 Yes、延迟 0、状态 healthy。Go 全量测试和前端构建通过，新增测试覆盖同长度数据变更、文件重命名、符号链接拒绝与校验取消。

@@ -9,6 +9,8 @@ import (
 )
 
 type mysqlBackupRequest struct {
+	Engine       string   `json:"engine,omitempty"`
+	ToolPath     string   `json:"tool_path,omitempty"`
 	AllDatabases bool     `json:"all_databases"`
 	Databases    []string `json:"databases,omitempty"`
 	OutputDir    string   `json:"output_dir,omitempty"`
@@ -26,7 +28,7 @@ func (s *Server) createMySQLBackup(c *gin.Context) {
 		return
 	}
 	task, err := s.mysqlBackup.CreateTask(c.Request.Context(), mysqlbackup.CreateRequest{
-		InstanceID: id, AllDatabases: body.AllDatabases, Databases: body.Databases,
+		InstanceID: id, Engine: body.Engine, ToolPath: body.ToolPath, AllDatabases: body.AllDatabases, Databases: body.Databases,
 		OutputDir: body.OutputDir, FileName: body.FileName,
 	})
 	if err != nil {

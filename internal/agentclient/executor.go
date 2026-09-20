@@ -114,6 +114,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 		return mysqlRestore(ctx, e.workDir, req.Params)
 	case "mysql.backup":
 		return mysqlBackup(ctx, e.workDir, req.Params)
+	case "mysql.xtrabackup.backup":
+		return mysqlXtraBackup(ctx, e.workDir, req.Params)
 	case "mysql.archive.precheck":
 		return mysqlArchivePrecheck(ctx, e.workDir, req.Params)
 	case "mysql.archive.start":
