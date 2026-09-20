@@ -39,6 +39,7 @@ type InstallRequest struct {
 	PackageID             int64  `json:"package_id"`
 	Name                  string `json:"name"`
 	Port                  int    `json:"port"`
+	InstallRoot           string `json:"install_root"`
 	BaseDir               string `json:"base_dir"`
 	DataDir               string `json:"data_dir"`
 	LogDir                string `json:"log_dir"`
@@ -299,26 +300,8 @@ func (s *Service) validateRequest(ctx context.Context, req InstallRequest) (doma
 	if req.Name == "" {
 		req.Name = fmt.Sprintf("mysql-%d", req.Port)
 	}
-	if req.BaseDir == "" {
-		req.BaseDir = fmt.Sprintf("/opt/dbops/mysql/%s-%d", safeVersion(pkg.Version), req.Port)
-	}
-	if req.DataDir == "" {
-		req.DataDir = fmt.Sprintf("/data/mysql/%d/data", req.Port)
-	}
-	if req.LogDir == "" {
-		req.LogDir = fmt.Sprintf("/data/mysql/%d/log", req.Port)
-	}
-	if req.BinlogDir == "" {
-		req.BinlogDir = fmt.Sprintf("/data/mysql/%d/binlog", req.Port)
-	}
-	if req.RunDir == "" {
-		req.RunDir = fmt.Sprintf("/data/mysql/%d/run", req.Port)
-	}
-	if req.ConfigPath == "" {
-		req.ConfigPath = fmt.Sprintf("/etc/dbops/mysql/%d/my.cnf", req.Port)
-	}
-	if req.ServiceName == "" {
-		req.ServiceName = fmt.Sprintf("dbops-mysql-%d", req.Port)
+	if err := NormalizeLayout(&req); err != nil {
+		return agent, pkg, req, err
 	}
 	if req.ServiceMode == "" {
 		req.ServiceMode = "systemd"

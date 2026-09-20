@@ -296,7 +296,9 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 	}
 	if err := runStep(14, "INITIALIZE_DATABASE", "Initialize MySQL", func() (any, error) {
 		args := []string{"--defaults-file=" + p.ConfigPath, "--initialize-insecure"}
-		if p.ManageOSUser && os.Geteuid() == 0 {
+		// Existing users also need file ownership matching the service account.
+		// ManageOSUser controls account creation, not the mysqld runtime identity.
+		if os.Geteuid() == 0 {
 			args = append(args, "--user="+p.MySQLUser)
 		}
 		out, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysqld"), args...)
@@ -326,7 +328,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 			return map[string]any{"output": out}, err
 		}
 		args := []string{"--defaults-file=" + p.ConfigPath, "--daemonize"}
-		if p.ManageOSUser && os.Geteuid() == 0 {
+		if os.Geteuid() == 0 {
 			args = append(args, "--user="+p.MySQLUser)
 		}
 		out, err := runCommand(ctx, filepath.Join(p.BaseDir, "bin", "mysqld"), args...)

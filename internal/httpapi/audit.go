@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"time"
@@ -56,15 +57,21 @@ func (s *Server) listAudit(c *gin.Context) {
 }
 func (s *Server) createMySQLPrecheck(c *gin.Context) {
 	var body struct {
-		AgentID int64  `json:"agent_id"`
-		Port    int    `json:"port"`
-		DataDir string `json:"data_dir"`
+		AgentID     int64  `json:"agent_id"`
+		Port        int    `json:"port"`
+		DataDir     string `json:"data_dir"`
+		InstallRoot string `json:"install_root"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.AgentID <= 0 || body.Port < 1 || body.Port > 65535 {
 		c.JSON(400, gin.H{"code": "INVALID_PARAMETER"})
 		return
 	}
-	raw, _ := json.Marshal(map[string]any{"action": "mysql.precheck", "timeout_seconds": 60, "params": map[string]any{"port": body.Port, "data_dir": body.DataDir}})
+	layout := mysqlinstall.InstallRequest{Port: body.Port, InstallRoot: body.InstallRoot, DataDir: body.DataDir}
+	if err := mysqlinstall.NormalizeLayout(&layout); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
+		return
+	}
+	raw, _ := json.Marshal(map[string]any{"action": "mysql.precheck", "timeout_seconds": 60, "params": map[string]any{"port": body.Port, "data_dir": layout.DataDir}})
 	t, err := s.tasks.Create(c.Request.Context(), domain.Task{TaskType: "agent.action", AgentID: &body.AgentID, ParametersJSON: string(raw)})
 	if err != nil {
 		fail(c, err)

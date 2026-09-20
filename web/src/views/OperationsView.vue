@@ -11,6 +11,13 @@ const selected=ref(''),busy=ref(false),error=ref(''),result=ref<any>(null),confi
 const form=reactive<Record<string,any>>({})
 const sources=reactive<Record<string,any[]>>({agents:[],packages:[],databases:[]})
 const operation=computed(()=>available.value.find(o=>o.name===selected.value))
+function layoutDefault(key:string){
+ if(!['/mysql/install','/mysql/precheck'].includes(operation.value?.path??''))return ''
+ const root=String(form.install_root||'/opt/dbops').replace(/\/+$/,'')
+ const port=form.port||3306, directory=`${root}/mysql/${port}`
+ const paths:Record<string,string>={base_dir:`${directory}/base`,data_dir:`${directory}/data`,log_dir:`${directory}/log`,binlog_dir:`${directory}/binlog`,run_dir:`${directory}/run`,config_path:`${directory}/conf/my.cnf`,service_name:`dbops-mysql${port}.service`}
+ return paths[key]||''
+}
 function reset(){Object.keys(form).forEach(k=>delete form[k]);operation.value?.fields.forEach(f=>form[f.key]=f.value??(f.type==='boolean'?false:''));error.value='';result.value=null;confirmed.value=false}
 function options(f:Field){if(f.choices)return f.choices.map(v=>({id:v,label:v}));return(sources[f.source??'']??[]).filter(v=>!f.engine||v.db_type===f.engine||(f.engine==='postgres'&&v.db_type==='postgresql')).map(v=>({id:v.id,label:`#${v.id} ${v.name||v.agent_uuid||`${v.software_name} ${v.version} ${v.architecture}`}${v.status?` · ${v.status}`:''}`}))}
 async function submit(){
@@ -42,7 +49,8 @@ onMounted(async()=>{try{await auth.loadMe();const [agents,packages,databases]=aw
     <el-select v-if="f.type==='select'" v-model="form[f.key]" filterable style="width:100%"><el-option v-for="o in options(f)" :key="o.id" :value="o.id" :label="o.label" /></el-select>
     <el-switch v-else-if="f.type==='boolean'" v-model="form[f.key]" />
     <el-input-number v-else-if="f.type==='number'" v-model="form[f.key]" :min="0" :precision="0" style="width:100%" />
-    <el-input v-else v-model="form[f.key]" :type="f.type==='password'?'password':'text'" :show-password="f.type==='password'" autocomplete="off" />
+    <el-input v-else v-model="form[f.key]" :placeholder="layoutDefault(f.key)" :type="f.type==='password'?'password':'text'" :show-password="f.type==='password'" autocomplete="off" />
+    <small v-if="layoutDefault(f.key)" class="muted">留空使用 {{layoutDefault(f.key)}}</small>
    </el-form-item>
    <el-alert v-if="operation?.risk" :title="operation.risk" type="warning" :closable="false" show-icon />
    <el-checkbox v-if="operation?.risk" v-model="confirmed">我已核对目标并确认执行此操作</el-checkbox>

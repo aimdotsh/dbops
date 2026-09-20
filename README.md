@@ -14,6 +14,12 @@
 
 实现与验收范围见 [验收记录](docs/acceptance.md)。完整设计是目标说明，不能视为所有条目已经实现或通过真实数据库验收。
 
+## MySQL 安装目录与服务名称
+
+安装根目录默认 `/opt/dbops`。端口为 13307 时，实例目录为 `/opt/dbops/mysql/13307`，其下包含 `base`、`data`、`log`、`binlog`、`run` 和 `conf/my.cnf`；systemd 服务默认 `dbops-mysql13307.service`。不同端口使用独立目录。
+
+操作页面可填写安装根目录和自定义服务名称；可选路径留空时，页面根据根目录和端口显示实际默认值。API `POST /api/v1/mysql/install` 同样支持 `install_root`、`service_name`，以及单独覆盖 `base_dir`、`data_dir`、`log_dir`、`binlog_dir`、`run_dir`、`config_path`。服务名称可带或不带 `.service` 后缀。例如 `install_root: "/srv/dbops"`、`service_name: "reporting-mysql.service"`，会使用 `/srv/dbops/mysql/<端口>` 和指定服务名。已有实例不会因修改安装默认值而自动迁移。
+
 ## 本地构建
 
 需要 Go 1.23+、Node.js 22 和 npm。先构建 Web，再编译 Server，才能内嵌完整页面：
