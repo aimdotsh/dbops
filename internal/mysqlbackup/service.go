@@ -11,6 +11,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/actionpolicy"
 	"github.com/aimdotsh/dbops/internal/agentproto"
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/mysqlinstall"
 	"github.com/aimdotsh/dbops/internal/repository"
 	"github.com/aimdotsh/dbops/internal/security"
 )
@@ -20,6 +21,7 @@ type AgentDispatcher interface {
 }
 
 type Service struct {
+	installer   *mysqlinstall.Service
 	agents      repository.AgentRepository
 	dbs         repository.DatabaseRepository
 	credentials repository.CredentialRepository

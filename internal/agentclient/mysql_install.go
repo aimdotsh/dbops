@@ -82,6 +82,8 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 	}
 	markerPath := filepath.Join(taskDir, "mysql-install.json")
 	bootstrapCreated := false
+	restore, _ := req.Params["restore"].(map[string]any)
+	newServiceCreated := false
 	if _, err := os.Lstat(markerPath); err == nil {
 		return nil, errors.New("installation marker already exists; verify previous execution before retry")
 	} else if !os.IsNotExist(err) {
@@ -96,6 +98,11 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 			_ = os.Remove(filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql"))
 		}
 		if retErr != nil {
+			if restore != nil && newServiceCreated {
+				stopCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				_, _ = runCommand(stopCtx, "systemctl", "disable", "--now", p.ServiceName+".service")
+				cancel()
+			}
 			marker.Status = "failed"
 			marker.Error = retErr.Error()
 			marker.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -128,6 +135,10 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		return nil
 	}
 
+	physical := restore != nil && restore["engine"] == "xtrabackup"
+	if physical {
+		p.ConfigText = strings.Replace(p.ConfigText, "[mysqld]", "[mysqld]\nskip_replica_start=ON", 1)
+	}
 	var precheck precheckResult
 	if err := runStep(1, "CHECK_AGENT", "Check Agent", func() (any, error) {
 		return map[string]any{"agent": "online", "goos": runtime.GOOS, "goarch": runtime.GOARCH}, nil
@@ -268,6 +279,9 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		// init_file runs account hardening before MySQL accepts connections.
 		bootstrapSQL := filepath.Join(filepath.Dir(p.ConfigPath), "dbops-bootstrap.sql")
 		sqlText := "SET SESSION sql_log_bin=0;\nALTER USER 'root'@'localhost' IDENTIFIED BY '" + p.RootPassword + "';\n"
+		if physical {
+			sqlText += "RESET REPLICA ALL;\n"
+		}
 		if err := writeNewFile(bootstrapSQL, []byte(sqlText), 0600); err != nil {
 			return nil, err
 		}
@@ -295,6 +309,36 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		return nil, err
 	}
 	if err := runStep(14, "INITIALIZE_DATABASE", "Initialize MySQL", func() (any, error) {
+		if physical {
+			result, err := mysqlPhysicalRestore(ctx, taskDir, restore)
+			if err != nil {
+				return nil, err
+			}
+			restored := result["restored_data_dir"].(string)
+			// Installation prechecks verified a new empty data directory.
+			if err := os.Remove(p.DataDir); err != nil {
+				return nil, err
+			}
+			if err := copyPhysicalBackup(ctx, restored, p.DataDir); err != nil {
+				return nil, err
+			}
+			for _, name := range []string{"auto.cnf", "mysqld-auto.cnf"} {
+				if err := os.Remove(filepath.Join(p.DataDir, name)); err != nil && !os.IsNotExist(err) {
+					return nil, err
+				}
+			}
+			if mysqlUID >= 0 {
+				if err := filepath.Walk(p.DataDir, func(path string, info os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					return os.Chown(path, mysqlUID, mysqlGID)
+				}); err != nil {
+					return nil, err
+				}
+			}
+			return map[string]any{"physical_data_restored": true, "new_uuid": true}, nil
+		}
 		args := []string{"--defaults-file=" + p.ConfigPath, "--initialize-insecure"}
 		// Existing users also need file ownership matching the service account.
 		// ManageOSUser controls account creation, not the mysqld runtime identity.
@@ -317,6 +361,7 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		if err != nil {
 			return nil, err
 		}
+		newServiceCreated = true
 		out, err := runCommand(ctx, "systemctl", "daemon-reload")
 		return map[string]any{"unit_path": unitPath, "output": out}, err
 	}); err != nil {
@@ -353,6 +398,22 @@ func mysqlInstall(ctx context.Context, workDir string, req agentproto.ActionRequ
 		return nil, err
 	}
 
+	if restore != nil && !physical {
+		if err := runStep(19, "RESTORE_LOGICAL_DATA", "Restore logical backup into new instance", func() (any, error) {
+			return mysqlRestore(ctx, taskDir, map[string]any{"base_dir": p.BaseDir, "run_dir": p.RunDir, "root_password": p.RootPassword, "backup_path": restore["backup_path"], "sha256": restore["sha256"]})
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if restore != nil {
+		out, err := runMySQLQuery(ctx, p.BaseDir, p.RunDir, p.RootPassword, "SELECT @@port,@@server_uuid;", false)
+		if err != nil {
+			return nil, fmt.Errorf("verify restored instance: %w", err)
+		}
+		if report != nil {
+			report(agentproto.ActionResponse{Status: "running", Progress: 95, Message: "Restored new instance verified", Result: map[string]any{"identity": out}})
+		}
+	}
 	marker.Status = "agent_complete"
 	marker.Step = "INITIALIZE_ACCOUNTS"
 	marker.Error = ""

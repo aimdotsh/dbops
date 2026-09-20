@@ -135,3 +135,36 @@ func TestLeaseOwnershipAndAgentSerialization(t *testing.T) {
 		t.Fatal("terminal task resurrected")
 	}
 }
+
+func TestNewHostRestoreLocksBothHostsUntilInterruptedReview(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	repo := TaskRepo{DB: db}
+	ctx := context.Background()
+	source, target := int64(1), int64(2)
+	job, err := repo.Create(ctx, domain.Task{TaskType: "mysql.restore_new", AgentID: &target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := repo.ClaimNext(ctx, "restore", 60); err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatal(claimed, err)
+	}
+	if _, err := repo.Create(ctx, domain.Task{TaskType: "mysql.backup", AgentID: &source}); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next != nil {
+		t.Fatal("source not locked", next, err)
+	}
+	if err := repo.UpdateStatus(ctx, job.ID, "interrupted", 0, "{}", "review required"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next != nil {
+		t.Fatal("interrupted restore not locked", next, err)
+	}
+	if err := repo.UpdateStatus(ctx, job.ID, "cancelled", 0, "{}", "reviewed"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next == nil {
+		t.Fatal("review did not release lock", next, err)
+	}
+}

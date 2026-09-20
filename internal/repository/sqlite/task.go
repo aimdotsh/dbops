@@ -80,7 +80,7 @@ func (r TaskRepo) ClaimNext(ctx context.Context, owner string, leaseSeconds int)
  (q.task_type='mysql.archive.control' OR NOT EXISTS
  (SELECT 1 FROM tasks active WHERE active.status IN ('running','interrupted')
  AND active.task_type<>'mysql.archive.control' AND
- (q.agent_id=active.agent_id OR q.task_type='mysql.replication.create' OR active.task_type='mysql.replication.create'))) ORDER BY q.id LIMIT 1)
+ (q.agent_id=active.agent_id OR q.task_type IN ('mysql.replication.create','mysql.restore_new') OR active.task_type IN ('mysql.replication.create','mysql.restore_new')))) ORDER BY q.id LIMIT 1)
  RETURNING id`, now.Format(time.RFC3339), owner, now.Add(time.Duration(leaseSeconds)*time.Second).Format(time.RFC3339))
 	var id int64
 	if err := row.Scan(&id); errors.Is(err, sql.ErrNoRows) {

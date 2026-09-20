@@ -40,7 +40,7 @@
 
 备份 3 SHA256：`b6db1500c149fd18c424386a179057abc5719f1fff4b477fde84ba5984f6ddca`。
 
-这是两台主机各自的备份恢复验证。平台自动恢复仍要求源和目标位于同一在线 Agent、版本一致且目标没有业务库；未实现跨主机备份传输或跨 Agent 自动恢复。
+这是早期两台主机各自的备份恢复验证，使用原主机确认恢复入口。后续已完成跨主机自动创建新实例恢复，见本报告末尾。
 
 ## XtraBackup 物理基线
 
@@ -87,3 +87,21 @@ Percona 的兼容性表列出 8.0.35-36 支持 MySQL 8.0.36 及之后的 8.0.x�
 - clp02：直连 SSH 超时后，经 clp01 内网跳转并使用原有主机密钥校验完成 Agent 升级。恢复入口拒绝缺少全文件摘要标识的旧备份 9。任务 45 重新生成备份 10，任务 46 prepare/copy-back 到 `physical-recovery-2300873410/data` 成功，摘要为 `b685e778d8157e38f08bcfbf91355b9c8d2c8a9232f40038f93331dfb6ad5c8a`。
 - 两项恢复结果均为 awaiting_manual_activation、restored=false，未执行停库和目录切换。暂存目录位于各 Agent 的 `/opt/dbops-acceptance-20260920/agent-data/`。完成后复制 healthy，IO/SQL Yes，延迟 0。
 - 本轮验证的是平台暂存恢复，不等同于目标数据库已经切换。既有 13311 手工启动恢复验收独立保留。人工切换、核查、回退及中断清理流程见 operations.md。
+
+### 新主机自动恢复验收
+
+| 项目 | 逻辑备份 | 物理备份 |
+| --- | --- | --- |
+| 来源 | clp01 实例 3，mysqldump 备份 2 | clp01 实例 3，XtraBackup 备份 8 |
+| 自动恢复任务 | 47 | 48 |
+| 新实例 | clp02 实例 8 / 13312 | clp02 实例 9 / 13313 |
+| 目录 / systemd | `/opt/dbops/mysql/13312` / `dbops-mysql13312.service` | `/opt/dbops/mysql/13313` / `dbops-mysql13313.service` |
+| server_id | 1010 | 1011 |
+| 新 UUID | c50e0dcc-b4c0-11f1-aa21-bae90dbfe2c0 | ccdad7c3-b4c0-11f1-bec4-bae90dbfe2c0 |
+| 数据核验 | 六条测试记录逐条一致 | 六条测试记录逐条一致 |
+| 复制通道 | 无 | 无，旧复制配置已清除 |
+| 重启验收 | 任务 49 成功 | 任务 50 成功 |
+
+两次请求均未传 `confirmed`。传输经 Agent 认证通道完成，新实例创建、导入/物理恢复、设置新 root 密码、启动、核验和平台注册连续完成，返回 restored=true/online，不停留于人工切换。使用平台登记凭据连接成功；原主从复制继续 healthy。原主机 `/mysql/restores` 缺少 confirmed 的请求以及新主机入口指向源主机的请求均返回 400。
+
+该轮代码新增分块传输摘要/覆盖保护测试、新旧主机确认分支测试、跨主机恢复全局互斥与中断阻塞测试。Go 全量测试和前端构建通过。凭据与二进制不入 Git。

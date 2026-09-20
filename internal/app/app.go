@@ -148,6 +148,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	)
 
 	mysqlBackup := mysqlbackup.New(agentRepo, dbRepo, credentialRepo, backupRepo, taskRepo, cipher, gateway)
+	mysqlBackup.SetInstaller(mysqlInstaller)
 	mysqlArchive := mysqlarchive.New(agentRepo, dbRepo, credentialRepo, archivePolicyRepo, archiveRepo, taskRepo, cipher, gateway)
 
 	mysqlReplication := mysqlreplication.New(
@@ -182,6 +183,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	taskEngine.Register("mysql.install", mysqlInstaller.Handler())
 	taskEngine.Register("mysql.backup", mysqlBackup.Handler())
 	taskEngine.Register("mysql.restore", mysqlBackup.RestoreHandler())
+	taskEngine.Register("mysql.restore_new", mysqlBackup.NewHostHandler())
 	taskEngine.Register("mysql.archive.run", mysqlArchive.RunHandler())
 	taskEngine.Register("mysql.archive.control", mysqlArchive.ControlHandler())
 	taskEngine.Register("mysql.replication.create", mysqlReplication.Handler())

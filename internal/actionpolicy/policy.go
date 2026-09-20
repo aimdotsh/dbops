@@ -22,6 +22,12 @@ type Policy struct {
 }
 
 var policies = map[string]Policy{
+	"backup.transfer.export":  {Action: "backup.transfer.export", Risk: R1},
+	"backup.transfer.read":    {Action: "backup.transfer.read", Risk: R1},
+	"backup.transfer.write":   {Action: "backup.transfer.write", Risk: R1},
+	"backup.transfer.finish":  {Action: "backup.transfer.finish", Risk: R1},
+	"backup.transfer.cleanup": {Action: "backup.transfer.cleanup", Risk: R1},
+
 	"host.info":                   {Action: "host.info", Risk: R0},
 	"host.disk.list":              {Action: "host.disk.list", Risk: R0},
 	"host.port.check":             {Action: "host.port.check", Risk: R0},

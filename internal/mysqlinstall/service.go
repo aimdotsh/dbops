@@ -112,7 +112,16 @@ func (s *Service) CreateTask(ctx context.Context, req InstallRequest) (domain.Ta
 	return created, nil
 }
 
-func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
+func (s *Service) Handler() func(context.Context, domain.Task) (any, error) { return s.handler(nil) }
+
+// RestoreIntoNew is called only by the server's validated new-host workflow.
+func (s *Service) RestoreIntoNew(ctx context.Context, t domain.Task, restore map[string]any) (any, error) {
+	return s.handler(restore)(ctx, t)
+}
+func (s *Service) ValidateNew(ctx context.Context, req InstallRequest) (domain.Agent, domain.SoftwarePackage, InstallRequest, error) {
+	return s.validateRequest(ctx, req)
+}
+func (s *Service) handler(restore map[string]any) func(context.Context, domain.Task) (any, error) {
 	return func(ctx context.Context, t domain.Task) (any, error) {
 		if t.AgentID == nil {
 			return nil, errors.New("mysql.install requires agent_id")
@@ -198,6 +207,9 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			"credential_id":    credential.ID,
 		}
 
+		if restore != nil {
+			actionParams["restore"] = restore
+		}
 		resp, dispatchErr := s.dispatcher.Dispatch(ctx, *t.AgentID, agentproto.ActionRequest{
 			TaskID: t.ID, Action: "mysql.install", Risk: string(policy.Risk),
 			ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 3600, Params: actionParams,
@@ -229,8 +241,12 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 
 		instanceOutput, _ := json.Marshal(map[string]any{"instance_id": instance.ID, "host_id": instance.HostID, "port": instance.Port})
+		stepOffset := 0
+		if restore != nil {
+			stepOffset = 1
+		}
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
-			TaskID: t.ID, StepNo: 19, StepCode: "REGISTER_INSTANCE", StepName: "Register instance",
+			TaskID: t.ID, StepNo: 19 + stepOffset, StepCode: "REGISTER_INSTANCE", StepName: "Register instance",
 			Status: "success", Progress: 96, OutputJSON: string(instanceOutput), RecoveryPolicy: "verify_before_retry",
 		})
 		_ = s.tasks.AddEvent(ctx, domain.TaskEvent{
@@ -238,7 +254,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			Message: "database instance registered", PayloadJSON: string(instanceOutput),
 		})
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
-			TaskID: t.ID, StepNo: 20, StepCode: "ENABLE_METRICS", StepName: "Enable metrics",
+			TaskID: t.ID, StepNo: 20 + stepOffset, StepCode: "ENABLE_METRICS", StepName: "Enable metrics",
 			Status: "success", Progress: 98, OutputJSON: `{"discovery":"database_instances"}`, RecoveryPolicy: "verify_before_retry",
 		})
 		verified, verifyErr := s.dbs.Get(ctx, instance.ID)
@@ -249,7 +265,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, fmt.Errorf("final verify: instance status is %s", verified.Status)
 		}
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
-			TaskID: t.ID, StepNo: 21, StepCode: "FINAL_VERIFY", StepName: "Final verify",
+			TaskID: t.ID, StepNo: 21 + stepOffset, StepCode: "FINAL_VERIFY", StepName: "Final verify",
 			Status: "success", Progress: 100, OutputJSON: `{"verified":true}`, RecoveryPolicy: "verify_before_retry",
 		})
 

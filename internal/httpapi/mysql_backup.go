@@ -69,3 +69,17 @@ func (s *Server) createMySQLRestore(c *gin.Context) {
 	}
 	c.JSON(202, gin.H{"code": "OK", "data": t})
 }
+
+func (s *Server) createMySQLNewHostRestore(c *gin.Context) {
+	var req mysqlbackup.NewHostRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"code": "INVALID_PARAMETER", "message": err.Error()})
+		return
+	}
+	t, err := s.mysqlBackup.CreateNewHostRestore(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "MYSQL_RESTORE_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(202, gin.H{"code": "OK", "data": t})
+}

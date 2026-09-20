@@ -85,6 +85,8 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 	defer cancel()
 
 	switch req.Action {
+	case "backup.transfer.export", "backup.transfer.read", "backup.transfer.write", "backup.transfer.finish", "backup.transfer.cleanup":
+		return backupTransfer(ctx, e.workDir, req.Action, req.Params)
 	case "host.info":
 		return hostInfo()
 	case "host.disk.list":

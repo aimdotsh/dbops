@@ -142,6 +142,7 @@ func New(
 
 	protected.POST("/mysql/install", adminDBA, s.createMySQLInstall)
 	protected.POST("/mysql/restores", adminDBA, s.createMySQLRestore)
+	protected.POST("/mysql/restores/new-host", adminDBA, s.createMySQLNewHostRestore)
 	protected.GET("/mysql/backups", read, s.listMySQLBackups)
 	protected.POST("/mysql/instances/:id/backups", ops, s.createMySQLBackup)
 

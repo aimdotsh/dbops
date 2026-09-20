@@ -46,7 +46,7 @@ SuperAdmin 在“操作中心”创建项目、环境和用户；分配主机的
 
 GTID 复制配置要求操作者已完成一致基线准备，并明确确认 baseline_ready。当前流程不自动传输或还原基线，不代表支持一键从任意已有数据建立复制。
 
-自动逻辑恢复仅接受成功的、显式指定用户库的 mysqldump 备份。目标必须是不同实例、同一在线 Agent、完全相同 MySQL 版本，且没有用户库。系统库和 all_databases 备份只能人工恢复。恢复前复制备份到私有临时文件，校验 SHA256 和 gzip 完整性；确认后执行 SQL。它不保证跨引擎事务一致性，也不提供失败回滚，失败的目标必须人工检查。逻辑恢复不覆盖已有业务数据。
+原主机逻辑恢复接口 `/mysql/restores` 仅接受成功的、显式指定用户库的 mysqldump 备份。目标必须是不同实例、同一在线 Agent、完全相同 MySQL 版本，且没有用户库，并要求 `confirmed=true`。系统库和 all_databases 备份只能人工恢复。恢复前复制备份到私有临时文件，校验 SHA256 和 gzip 完整性；确认后执行 SQL。它不保证跨引擎事务一致性，也不提供失败回滚，失败的目标必须人工检查。逻辑恢复不覆盖已有业务数据。
 
 ## 中断任务
 
@@ -89,7 +89,7 @@ Webhook 使用 Bearer token；SMTP 要求 STARTTLS。失败进入持久重试队
 
 物理备份摘要使用 `sorted-file-manifest-v1`：按相对路径排序，对每个普通文件的路径、大小和完整 SHA256 生成清单摘要；不接受符号链接。应在 prepare 前校验原始备份，prepare 会改变文件。
 
-## MySQL 物理恢复暂存与人工切换
+## 原主机 MySQL 物理恢复暂存与人工切换
 
 `POST /mysql/restores` 接受 XtraBackup 备份的 `backup_id`、同 Agent 同版本的不同 `target_instance_id`、`confirmed=true` 和可选 `tool_path`。仅接受含 `checksum_scope=sorted-file-manifest-v1` 的完整物理备份；旧 checkpoint 摘要不能用于恢复。平台复制原备份到私有目录，校验全部文件，再 prepare 和 copy-back 到独立 data 暂存目录。原备份和运行中的目标均不改变。
 
@@ -104,3 +104,28 @@ Webhook 使用 Bearer token；SMTP 要求 STARTTLS。失败进入持久重试队
 5. 若核对失败，停止目标并保留新目录供排查，再切回保留的原目录和配置；不要自动删除失败现场或重试覆盖。成功验收后才按保留策略清理暂存与回退目录。
 
 Agent/Server 中断时按“中断任务”流程核查，暂存目录可能残留。先确认没有 prepare/copy-back 进程，再决定保留或清理。平台不会在重启后自动激活数据。逻辑恢复仍要求无用户库目标；物理暂存不会修改所选目标，最终人工切换前必须重新检查目标数据和使用状态。
+
+## 新主机自动恢复
+
+在操作中心选择“MySQL 新主机恢复”，或调用 `POST /api/v1/mysql/restores/new-host`。该入口同时支持 mysqldump 和 XtraBackup；选择来源备份、另一台在线 Agent、同版本 MySQL 软件包、新实例名和端口，无需 `confirmed` 或后续人工切换。
+
+```json
+{
+  "backup_id": 8,
+  "agent_id": 2,
+  "package_id": 2,
+  "name": "restored-mysql",
+  "port": 13313,
+  "install_root": "/opt/dbops",
+  "manage_os_user": true,
+  "tool_path": "/usr/bin/xtrabackup"
+}
+```
+
+上例 ID 仅为示例，必须替换为目标环境中的记录。逻辑恢复无需 tool_path；物理恢复要求目标主机已安装兼容 XtraBackup。可沿用 MySQL 安装接口的自定义目录、服务名、OS 用户和资源参数。
+
+平台先在源 Agent 创建并校验私有备份副本，经已有认证连接以 256 KiB 分块传输，目标重新验证传输摘要。备份内容不写入任务事件。目标按全新安装检查端口、服务和目录，自动创建新实例；任一已有数据目录都不能被该入口覆盖。逻辑恢复导入显式用户库，物理恢复执行 prepare/copy-back，生成新 UUID/server_id，关闭自动复制启动并清除历史复制通道，在监听前设置新 root 密码。验证后才登记实例和加密凭据，返回 `restored=true`、实例 ID、主机 ID、端口及 online 状态。密码不出现在任务结果中。
+
+源主机与目标主机相同时此入口直接拒绝，必须使用带人工确认的原主机恢复接口。两台主机与备份均受资源范围授权。跨主机恢复任务采用保守全局互斥，中断后先人工核查目标状态再解除；不会自动覆盖重试。失败的新 systemd 服务会尝试停止并禁用，文件现场保留。传输临时文件在任务结束时清理；新实例任务目录内的物理 prepare 副本按运维保留策略人工清理。
+
+当前逻辑恢复仍不支持 all_databases/系统库备份自动导入；新主机必须在线，备份所在 Agent 也必须在线。跨版本恢复、从离线对象存储取回、已有目标覆盖均不在此入口范围。

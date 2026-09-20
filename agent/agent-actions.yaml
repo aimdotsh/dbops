@@ -121,3 +121,18 @@ actions:
   - name: doris.backup
     timeout: 86400
     risk: R1
+  - name: backup.transfer.export
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.read
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.write
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.finish
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.cleanup
+    timeout: 86400
+    risk: R1
