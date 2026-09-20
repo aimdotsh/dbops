@@ -119,6 +119,16 @@ func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// A cancelled context or process crash can prevent backup handlers from
+	// recording failure. Reconcile only unfinished records, never verified backups.
+	_, err = r.DB.ExecContext(ctx, `UPDATE backup_jobs SET status='failed',finished_at=?,
+ error_message='task ended without a verified backup; inspect agent output before retry'
+ WHERE status IN ('pending','running') AND task_id IN
+ (SELECT id FROM tasks WHERE status IN ('interrupted','cancelled','failed','timeout'))`,
+		time.Now().UTC().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
 	return res.RowsAffected()
 }
 

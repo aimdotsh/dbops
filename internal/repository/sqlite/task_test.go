@@ -41,6 +41,9 @@ CREATE TABLE tasks (
   lease_owner TEXT,
   lease_expires_at TEXT,
   recovery_policy TEXT NOT NULL
+);
+CREATE TABLE backup_jobs (
+ id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT, error_message TEXT
 );`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)

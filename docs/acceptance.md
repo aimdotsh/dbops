@@ -25,6 +25,8 @@
 
 自动化入口：`.github/workflows/hardening-ci.yml` 和 `scripts/test-real-mysql.sh`。开发环境的详细日志存于忽略目录 `.local-test/`，不把临时数据库、测试密钥、二进制或日志提交到仓库。
 
+本次双机故障、逻辑备份恢复和平台任务中断验收的逐项记录见 [真实环境验收报告](real-environment-acceptance-20260920.md)。
+
 ## 实现边界和仍需完成的设计项
 
 以下项目尚不能标记为“完整 V1.0 已完成”：
