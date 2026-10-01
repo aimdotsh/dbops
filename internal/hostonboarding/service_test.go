@@ -26,3 +26,23 @@ func TestValidateServerURL(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHostProbeIgnoresLoginBanner(t *testing.T) {
+	output := "Welcome to the server\r\n__DBOPS_PROBE_V1__\nOS=Linux\nARCH=aarch64\nHOSTNAME=db01\nSYSTEMCTL=/usr/bin/systemctl\nELEVATION=passwordless\n__DBOPS_PROBE_END__\n"
+	probe, err := parseHostProbe(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.os != "Linux" || probe.arch != "aarch64" || probe.hostname != "db01" || probe.systemctl == "" {
+		t.Fatalf("unexpected probe: %#v", probe)
+	}
+}
+
+func TestParseHostProbeReportsMissingMarkerAndFields(t *testing.T) {
+	if _, err := parseHostProbe("restricted shell"); err == nil {
+		t.Fatal("missing marker accepted")
+	}
+	if _, err := parseHostProbe("__DBOPS_PROBE_V1__\nOS=Linux\n__DBOPS_PROBE_END__"); err == nil {
+		t.Fatal("missing fields accepted")
+	}
+}

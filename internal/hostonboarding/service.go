@@ -89,6 +89,42 @@ func New(cfg Config, agents repository.AgentRepository) *Service {
 	return &Service{cfg: cfg, agents: agents}
 }
 
+const hostProbeCommand = `printf '__DBOPS_PROBE_V1__\nOS=%s\nARCH=%s\nHOSTNAME=%s\nSYSTEMCTL=%s\nELEVATION=%s\n__DBOPS_PROBE_END__\n' "$(uname -s 2>/dev/null)" "$(uname -m 2>/dev/null)" "$(hostname 2>/dev/null)" "$(command -v systemctl 2>/dev/null || true)" "$(if [ "$(id -u 2>/dev/null)" = 0 ]; then echo root; elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then echo passwordless; else echo password; fi)"`
+
+type hostProbe struct {
+	os, arch, hostname, systemctl, elevation string
+}
+
+func parseHostProbe(output string) (hostProbe, error) {
+	const start, end = "__DBOPS_PROBE_V1__", "__DBOPS_PROBE_END__"
+	startAt := strings.Index(output, start)
+	if startAt < 0 {
+		return hostProbe{}, ValidationError{Message: "目标主机未返回探测标记，可能配置了 SSH 强制命令或受限 Shell"}
+	}
+	body := output[startAt+len(start):]
+	endAt := strings.Index(body, end)
+	if endAt < 0 {
+		return hostProbe{}, ValidationError{Message: "SSH 主机信息响应被截断，请检查登录 Shell 初始化脚本"}
+	}
+	values := map[string]string{}
+	for _, line := range strings.Split(body[:endAt], "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if found {
+			values[key] = strings.TrimSpace(value)
+		}
+	}
+	missing := make([]string, 0, 3)
+	for _, key := range []string{"OS", "ARCH", "HOSTNAME"} {
+		if values[key] == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) > 0 {
+		return hostProbe{}, ValidationError{Message: "SSH 主机信息缺少字段: " + strings.Join(missing, ", ")}
+	}
+	return hostProbe{os: values["OS"], arch: values["ARCH"], hostname: values["HOSTNAME"], systemctl: values["SYSTEMCTL"], elevation: values["ELEVATION"]}, nil
+}
+
 func (s *Service) Precheck(ctx context.Context, req Request) (PrecheckResult, error) {
 	if err := validateConnection(req); err != nil {
 		return PrecheckResult{}, err
@@ -102,21 +138,21 @@ func (s *Service) Precheck(ctx context.Context, req Request) (PrecheckResult, er
 		return PrecheckResult{}, fmt.Errorf("SSH 连接失败: %w", err)
 	}
 	defer client.Close()
-	out, err := run(client, "printf '%s|%s|%s|%s|%s' \"$(uname -s)\" \"$(uname -m)\" \"$(hostname)\" \"$(command -v systemctl || true)\" \"$(if [ \"$(id -u)\" = 0 ]; then echo root; elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then echo passwordless; else echo password; fi)\"", "")
+	out, err := run(client, hostProbeCommand, "")
 	if err != nil {
 		return PrecheckResult{}, fmt.Errorf("读取主机信息失败: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "|")
-	if len(lines) < 5 {
-		return PrecheckResult{}, errors.New("SSH 主机信息响应不完整")
+	probe, err := parseHostProbe(out)
+	if err != nil {
+		return PrecheckResult{}, err
 	}
-	arch, err := normalizeArch(lines[1])
+	arch, err := normalizeArch(probe.arch)
 	if err != nil {
 		return PrecheckResult{}, err
 	}
 	result := PrecheckResult{
-		Address: req.Address, OperatingSystem: strings.TrimSpace(lines[0]), Architecture: strings.TrimSpace(lines[1]),
-		Hostname: strings.TrimSpace(lines[2]), HasSystemd: strings.TrimSpace(lines[3]) != "", CanElevate: strings.TrimSpace(lines[4]) != "password" || req.SudoPassword != "" || req.Password != "",
+		Address: req.Address, OperatingSystem: probe.os, Architecture: probe.arch,
+		Hostname: probe.hostname, HasSystemd: probe.systemctl != "", CanElevate: probe.elevation != "password" || req.SudoPassword != "" || req.Password != "",
 		AgentArchitecture: arch, HostKeyFingerprint: fingerprint, DefaultServerURL: s.cfg.PublicURL,
 	}
 	if !strings.EqualFold(result.OperatingSystem, "Linux") {
@@ -302,19 +338,22 @@ WantedBy=multi-user.target
 type remoteDetails struct{ hostname, arch string }
 
 func (s *Service) remoteInfo(client *ssh.Client) (remoteDetails, error) {
-	out, err := run(client, "printf '%s|%s|%s|%s' \"$(uname -s)\" \"$(uname -m)\" \"$(hostname)\" \"$(command -v systemctl || true)\"", "")
+	out, err := run(client, hostProbeCommand, "")
 	if err != nil {
 		return remoteDetails{}, fmt.Errorf("读取主机信息失败: %w", err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "|")
-	if len(lines) < 4 || !strings.EqualFold(lines[0], "Linux") || strings.TrimSpace(lines[3]) == "" {
-		return remoteDetails{}, ValidationError{Message: "目标主机必须是使用 systemd 的 Linux"}
-	}
-	arch, err := normalizeArch(lines[1])
+	probe, err := parseHostProbe(out)
 	if err != nil {
 		return remoteDetails{}, err
 	}
-	return remoteDetails{hostname: strings.TrimSpace(lines[2]), arch: arch}, nil
+	if !strings.EqualFold(probe.os, "Linux") || probe.systemctl == "" {
+		return remoteDetails{}, ValidationError{Message: "目标主机必须是使用 systemd 的 Linux"}
+	}
+	arch, err := normalizeArch(probe.arch)
+	if err != nil {
+		return remoteDetails{}, err
+	}
+	return remoteDetails{hostname: probe.hostname, arch: arch}, nil
 }
 
 func validateConnection(req Request) error {
