@@ -13,6 +13,7 @@ import (
 	"github.com/aimdotsh/dbops/internal/config"
 	"github.com/aimdotsh/dbops/internal/domain"
 	dorissvc "github.com/aimdotsh/dbops/internal/doris"
+	"github.com/aimdotsh/dbops/internal/hostonboarding"
 	"github.com/aimdotsh/dbops/internal/httpapi"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/monitor"
@@ -248,6 +249,10 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	maintenance.Add(databaseMonitor.Tick)
 	maintenance.Add(policies.Tick)
 	maintenance.Add(alertEngine.DeliverPending)
+	hostOnboarding := hostonboarding.New(hostonboarding.Config{
+		PublicURL: cfg.Server.PublicURL, BootstrapToken: cfg.AgentGateway.BootstrapToken,
+		RequireMTLS: cfg.AgentGateway.RequireMTLS, InstallerRoot: "/opt/dbops/installers",
+	}, agentRepo)
 	var lastRetention time.Time
 	maintenance.Add(func(ctx context.Context) error {
 		if time.Since(lastRetention) < time.Hour {
@@ -283,6 +288,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 			oracleService,
 			postgresService,
 			dorisService,
+			hostOnboarding,
 			gateway,
 			cfg.AgentGateway.WebsocketPath,
 		),

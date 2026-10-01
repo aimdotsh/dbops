@@ -14,6 +14,8 @@ COPY . .
 COPY --from=web-build /src/internal/httpapi/web/dist ./internal/httpapi/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/dbops-server ./cmd/dbops-server
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/dbops-agent ./cmd/dbops-agent
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/installers/linux-amd64/dbops-agent ./cmd/dbops-agent
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/installers/linux-arm64/dbops-agent ./cmd/dbops-agent
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/dbops-restore ./cmd/dbops-restore
 RUN mkdir -p /out/data
@@ -23,6 +25,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/dbops-server /usr/local/bin/dbops-server
 COPY --from=build /out/dbops-agent /usr/local/bin/dbops-agent
+COPY --from=build /out/installers /opt/dbops/installers
 
 COPY --from=build /out/dbops-restore /usr/local/bin/dbops-restore
 COPY --from=build --chown=65532:65532 /out/data /data/dbops

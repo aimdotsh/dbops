@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getData } from '../api'
+import { ElMessage } from 'element-plus'
+import { api, getData } from '../api'
 
 const route=useRoute(),router=useRouter()
 const tab=ref(String(route.query.tab||'databases')),search=ref(String(route.query.search||'')),engine=ref('')
 const hosts=ref<any[]>([]),agents=ref<any[]>([]),databases=ref<any[]>([]),loading=ref(true)
+const onboardingOpen=ref(false),onboardingBusy=ref(false),onboardingStep=ref(0),precheck=ref<any>(null),fingerprintConfirmed=ref(false)
+const onboarding=ref<any>({address:'',port:22,username:'root',auth_type:'password',password:'',private_key:'',private_key_passphrase:'',sudo_password:'',advertise_ip:'',agent_id:'',server_url:window.location.origin,ca_certificate:''})
 const onlineAgents=computed(()=>agents.value.filter(x=>x.status==='online').length)
 const onlineDBs=computed(()=>databases.value.filter(x=>['online','healthy','running'].includes(String(x.status).toLowerCase())).length)
 const engines=computed(()=>[...new Set(databases.value.map(x=>x.db_type))])
@@ -15,13 +18,27 @@ const filteredHosts=computed(()=>hosts.value.filter(x=>!search.value||`${x.hostn
 const filteredAgents=computed(()=>agents.value.filter(x=>!search.value||`${x.agent_uuid} ${x.architecture}`.toLowerCase().includes(search.value.toLowerCase())))
 const tagType=(status:string)=>(['online','healthy','running'].includes(String(status).toLowerCase())?'success':String(status).toLowerCase()==='offline'?'danger':'info') as any
 function changeTab(){router.replace({query:{...route.query,tab:tab.value}});search.value=''}
+async function loadAssets(){[hosts.value,agents.value,databases.value]=await Promise.all([getData<any[]>('/hosts'),getData<any[]>('/agents'),getData<any[]>('/databases')])}
+function openOnboarding(){onboardingOpen.value=true;onboardingStep.value=0;precheck.value=null;fingerprintConfirmed.value=false}
+function resetOnboarding(){onboarding.value.password='';onboarding.value.private_key='';onboarding.value.private_key_passphrase='';onboarding.value.sudo_password='';precheck.value=null;fingerprintConfirmed.value=false;onboardingStep.value=0}
+async function runPrecheck(){
+ try{onboardingBusy.value=true;const response=await api.post('/hosts/onboarding/precheck',onboarding.value,{timeout:30000});precheck.value=response.data.data;onboarding.value.advertise_ip=onboarding.value.advertise_ip||(/^\d+\.\d+\.\d+\.\d+$/.test(onboarding.value.address)?onboarding.value.address:'');onboarding.value.server_url=precheck.value.default_server_url||onboarding.value.server_url;onboardingStep.value=1;ElMessage.success('SSH 连接和主机环境检查通过')}
+ catch(e:any){ElMessage.error(e.response?.data?.message||e.message||'预检失败')}
+ finally{onboardingBusy.value=false}
+}
+async function submitOnboarding(){
+ if(!fingerprintConfirmed.value){ElMessage.warning('请先核对并确认 SSH 主机指纹');return}
+ try{onboardingBusy.value=true;const payload={...onboarding.value,confirmed:true,host_key_fingerprint:precheck.value.host_key_fingerprint};const response=await api.post('/hosts/onboarding',payload,{timeout:60000});await loadAssets();tab.value='hosts';changeTab();onboardingStep.value=2;const result=response.data.data;ElMessage.success(result.connected?'主机已在线纳管，Agent 已连接':'Agent 已安装，正在等待连接')}
+ catch(e:any){ElMessage.error(e.response?.data?.message||e.message||'纳管失败')}
+ finally{onboardingBusy.value=false;onboarding.value.password='';onboarding.value.private_key='';onboarding.value.private_key_passphrase='';onboarding.value.sudo_password=''}
+}
 watch(()=>route.query.tab,v=>{if(v)tab.value=String(v)})
-onMounted(async()=>{try{[hosts.value,agents.value,databases.value]=await Promise.all([getData<any[]>('/hosts'),getData<any[]>('/agents'),getData<any[]>('/databases')])}finally{loading.value=false}})
+onMounted(async()=>{try{await loadAssets()}finally{loading.value=false}})
 </script>
 
 <template>
  <div>
-  <div class="page-title"><div><h2>资源中心</h2><p>统一管理数据库实例、主机资源与 Agent 连接</p></div><div class="page-actions"><el-button @click="router.push('/operations?category=onboarding')">纳管已有数据库</el-button><el-button type="primary" @click="router.push('/operations?category=onboarding')">部署新实例</el-button></div></div>
+  <div class="page-title"><div><h2>资源中心</h2><p>统一管理数据库实例、主机资源与 Agent 连接</p></div><div class="page-actions"><el-button @click="router.push('/operations?category=onboarding')">纳管已有数据库</el-button><el-button @click="openOnboarding">在线纳管主机</el-button><el-button type="primary" @click="router.push('/operations?category=onboarding')">部署新实例</el-button></div></div>
   <div class="asset-summary">
    <div class="asset-stat"><span>数据库实例</span><strong>{{databases.length}}</strong></div>
    <div class="asset-stat"><span>在线数据库</span><strong>{{onlineDBs}}</strong></div>
@@ -42,7 +59,7 @@ onMounted(async()=>{try{[hosts.value,agents.value,databases.value]=await Promise
      </el-table><el-empty v-if="!filteredDatabases.length" description="暂无数据库实例，点击右上角开始接入"/>
     </el-tab-pane>
     <el-tab-pane label="主机" name="hosts">
-     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索主机名或 IP" style="width:300px"/><span class="muted">共 {{filteredHosts.length}} 台主机</span></div>
+     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索主机名或 IP" style="width:300px"/><span class="muted">共 {{filteredHosts.length}} 台主机</span><el-button type="primary" style="margin-left:auto" @click="openOnboarding">在线纳管主机</el-button></div>
      <el-table :data="filteredHosts"><el-table-column prop="hostname" label="主机名" min-width="190"><template #default="{row}"><strong>{{row.hostname}}</strong><div class="muted">Host #{{row.id}}</div></template></el-table-column><el-table-column prop="ip_address" label="IP 地址" min-width="170"/><el-table-column label="状态" width="120"><template #default="{row}"><el-tag :type="tagType(row.status)">{{row.status}}</el-tag></template></el-table-column><el-table-column label="关联资源"><template #default="{row}">{{databases.filter(x=>x.host_id===row.id).length}} 个数据库</template></el-table-column></el-table><el-empty v-if="!filteredHosts.length" description="Agent 注册后会自动创建主机"/>
     </el-tab-pane>
     <el-tab-pane label="Agent" name="agents">
@@ -51,5 +68,29 @@ onMounted(async()=>{try{[hosts.value,agents.value,databases.value]=await Promise
     </el-tab-pane>
    </el-tabs>
   </el-card>
+  <el-dialog v-model="onboardingOpen" title="在线纳管主机" width="720px" destroy-on-close @closed="resetOnboarding">
+   <el-steps :active="onboardingStep" finish-status="success" align-center class="onboarding-steps"><el-step title="SSH 连接"/><el-step title="确认并安装"/><el-step title="纳管完成"/></el-steps>
+   <div v-if="onboardingStep===0" class="onboarding-form">
+    <el-alert title="平台通过 SSH 做一次性安装，认证信息仅用于本次请求，不会保存。" type="info" :closable="false" show-icon/>
+    <el-form label-position="top">
+     <div class="form-grid"><el-form-item label="主机地址"><el-input v-model="onboarding.address" placeholder="IP 地址或可解析的主机名"/></el-form-item><el-form-item label="SSH 端口"><el-input-number v-model="onboarding.port" :min="1" :max="65535" style="width:100%"/></el-form-item></div>
+     <div class="form-grid"><el-form-item label="SSH 用户名"><el-input v-model="onboarding.username"/></el-form-item><el-form-item label="认证方式"><el-select v-model="onboarding.auth_type" style="width:100%"><el-option label="密码" value="password"/><el-option label="私钥" value="private_key"/></el-select></el-form-item></div>
+     <el-form-item v-if="onboarding.auth_type==='password'" label="SSH 密码"><el-input v-model="onboarding.password" type="password" show-password autocomplete="new-password"/></el-form-item>
+     <template v-else><el-form-item label="SSH 私钥"><el-input v-model="onboarding.private_key" type="textarea" :rows="5" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"/></el-form-item><el-form-item label="私钥口令（可选）"><el-input v-model="onboarding.private_key_passphrase" type="password" show-password/></el-form-item></template>
+     <el-form-item v-if="onboarding.username!=='root'" label="sudo 密码（留空时尝试使用 SSH 密码）"><el-input v-model="onboarding.sudo_password" type="password" show-password/></el-form-item>
+    </el-form>
+   </div>
+   <div v-else-if="onboardingStep===1" class="onboarding-form">
+    <el-descriptions :column="2" border><el-descriptions-item label="主机名">{{precheck.hostname}}</el-descriptions-item><el-descriptions-item label="操作系统">{{precheck.operating_system}}</el-descriptions-item><el-descriptions-item label="CPU 架构">{{precheck.architecture}}</el-descriptions-item><el-descriptions-item label="Agent 安装包">linux-{{precheck.agent_architecture}}</el-descriptions-item></el-descriptions>
+    <div class="fingerprint-box"><span>SSH 主机指纹</span><code>{{precheck.host_key_fingerprint}}</code><el-checkbox v-model="fingerprintConfirmed">我已核对并确认该主机指纹</el-checkbox></div>
+    <el-form label-position="top">
+     <div class="form-grid"><el-form-item label="注册 IP"><el-input v-model="onboarding.advertise_ip" placeholder="Agent 上报给平台的主机 IP"/></el-form-item><el-form-item label="Agent 标识（可选）"><el-input v-model="onboarding.agent_id" placeholder="留空自动生成"/></el-form-item></div>
+     <el-form-item label="平台访问地址"><el-input v-model="onboarding.server_url" placeholder="目标主机可以访问的 DBOps 地址"/><div class="form-help">Agent 将主动连接此地址；请确保目标主机可以解析并访问。</div></el-form-item>
+     <el-collapse><el-collapse-item title="高级 TLS 配置" name="tls"><el-form-item label="平台 CA 证书（自签名 HTTPS 时填写）"><el-input v-model="onboarding.ca_certificate" type="textarea" :rows="4" placeholder="-----BEGIN CERTIFICATE-----"/></el-form-item></el-collapse-item></el-collapse>
+    </el-form>
+   </div>
+   <div v-else class="onboarding-success"><div class="success-mark">✓</div><h3>主机纳管请求已完成</h3><p>Agent 已安装为 systemd 服务，主机和连接状态已刷新。</p><el-button type="primary" @click="onboardingOpen=false">查看主机列表</el-button></div>
+   <template #footer><template v-if="onboardingStep===0"><el-button @click="onboardingOpen=false">取消</el-button><el-button type="primary" :loading="onboardingBusy" :disabled="!onboarding.address||!onboarding.username" @click="runPrecheck">连通性预检查</el-button></template><template v-else-if="onboardingStep===1"><el-button @click="onboardingStep=0">返回修改</el-button><el-button type="primary" :loading="onboardingBusy" :disabled="!fingerprintConfirmed||!onboarding.advertise_ip||!onboarding.server_url" @click="submitOnboarding">安装并注册 Agent</el-button></template></template>
+  </el-dialog>
  </div>
 </template>

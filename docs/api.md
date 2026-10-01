@@ -4,6 +4,8 @@
 
 | 方法与路径 | 用途 | 角色 |
 |---|---|---|
+| POST /hosts/onboarding/precheck | 使用一次性 SSH 凭据检查 Linux/systemd/架构并返回主机指纹 | DBA / SuperAdmin |
+| POST /hosts/onboarding | 提交已确认指纹，安装并注册 Agent | DBA / SuperAdmin |
 | POST /mysql/precheck | agent_id 与预检参数，创建只读任务 | DBA / SuperAdmin |
 | POST /mysql/restores | backup_id、target_instance_id、confirmed:true | DBA / SuperAdmin |
 | POST /mysql/restores/new-host | backup_id、agent_id、package_id、name、port；可选 tool_path 和安装布局，无需 confirmed | DBA / SuperAdmin |
@@ -34,6 +36,24 @@
 计划与授权字段的准确格式可查看 Web 的对应表单和 `internal/httpapi/schedules.go`、`scopes.go`；调试请求中不要记录密码或 token。
 
 ## 例子
+
+在线纳管先预检，再将响应中的 `host_key_fingerprint` 原样带入正式请求。两次请求都要带 SSH 认证字段；这些字段不会保存。`server_url` 是目标主机访问平台的地址。
+
+```json
+{
+  "address": "10.0.10.21",
+  "port": 22,
+  "username": "dbops",
+  "auth_type": "private_key",
+  "private_key": "<PEM or OpenSSH private key>",
+  "private_key_passphrase": "<optional>",
+  "sudo_password": "<optional>",
+  "advertise_ip": "10.0.10.21",
+  "server_url": "https://dbops.example.com",
+  "host_key_fingerprint": "SHA256:<precheck result>",
+  "confirmed": true
+}
+```
 
 创建每 24 小时执行的平台备份计划：
 

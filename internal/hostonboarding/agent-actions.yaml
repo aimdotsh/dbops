@@ -1,0 +1,138 @@
+version: 1
+transport:
+  protocol: HTTPS_WebSocket
+  agent_initiated_connection: true
+  heartbeat_seconds: 30
+  task_event_push_seconds: 5
+security:
+  arbitrary_shell: forbidden
+  arbitrary_sql: forbidden
+  secret_in_logs: forbidden
+  action_allowlist: required
+common_request:
+  fields: [request_id, task_id, action, risk, confirmed, protocol_version, timeout_seconds, params]
+common_response:
+  fields: [request_id, task_id, status, progress, step, message, result, error]
+actions:
+  - name: host.info
+    timeout: 30
+    risk: R0
+  - name: host.disk.list
+    timeout: 30
+    risk: R0
+  - name: host.port.check
+    timeout: 10
+    risk: R0
+    params: [port]
+  - name: host.directory.check
+    timeout: 15
+    risk: R0
+    params: [path, require_empty, min_free_bytes]
+  - name: mysql.metrics
+    timeout: 15
+    risk: R0
+  - name: mysql.precheck
+    timeout: 120
+    risk: R0
+    params: [port, data_dir, min_free_bytes, min_memory_bytes, min_cpu_cores, expected_os, expected_arch, service_name]
+  - name: mysql.install
+    timeout: 3600
+    risk: R2
+    params: [port, data_dir, execute]
+    idempotency_key: host_id+port
+  - name: mysql.start
+    timeout: 120
+    risk: R1
+  - name: mysql.stop
+    timeout: 120
+    risk: R3
+  - name: mysql.restart
+    timeout: 300
+    risk: R3
+  - name: mysql.replication.precheck
+    timeout: 300
+    risk: R0
+  - name: mysql.replication.create
+    timeout: 43200
+    risk: R3
+  - name: mysql.replication.status
+    timeout: 60
+    risk: R0
+  - name: mysql.backup
+    timeout: 86400
+    risk: R1
+  - name: mysql.xtrabackup.backup
+    timeout: 86400
+    risk: R1
+  - name: mysql.restore
+    timeout: 86400
+    risk: R4
+  - name: mysql.xtrabackup.restore
+    timeout: 86400
+    risk: R4
+  - name: mysql.archive.precheck
+    timeout: 600
+    risk: R0
+  - name: mysql.archive.start
+    timeout: 86400
+    risk: R3
+  - name: mysql.archive.pause
+    timeout: 60
+    risk: R1
+  - name: mysql.archive.resume
+    timeout: 60
+    risk: R1
+  - name: mysql.archive.stop
+    timeout: 60
+    risk: R3
+  - name: oracle.dataguard.status
+    timeout: 60
+    risk: R0
+  - name: oracle.status
+    timeout: 60
+    risk: R0
+  - name: oracle.tablespace.list
+    timeout: 60
+    risk: R0
+  - name: oracle.datafile.list
+    timeout: 60
+    risk: R0
+  - name: oracle.datafile.add
+    timeout: 600
+    risk: R3
+  - name: oracle.datafile.resize
+    timeout: 600
+    risk: R3
+  - name: oracle.rman.backup
+    timeout: 86400
+    risk: R1
+  - name: postgres.status
+    timeout: 60
+    risk: R0
+  - name: postgres.replication.status
+    timeout: 60
+    risk: R0
+  - name: postgres.backup
+    timeout: 86400
+    risk: R1
+  - name: doris.cluster.status
+    timeout: 60
+    risk: R0
+  - name: doris.backup
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.export
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.read
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.write
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.finish
+    timeout: 86400
+    risk: R1
+  - name: backup.transfer.cleanup
+    timeout: 86400
+    risk: R1

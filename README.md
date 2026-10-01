@@ -4,7 +4,7 @@
 
 ## 当前能力
 
-- JWT 登录、角色权限、项目与环境组合授权、操作审计；Agent 注册凭据、TLS/mTLS 和动作白名单。
+- JWT 登录、角色权限、项目与环境组合授权、操作审计；SSH 在线纳管 Linux 主机、Agent 注册凭据、TLS/mTLS 和动作白名单。
 - 持久化任务、原子领取、租约续期、过期任务中断、人工核查解除；同主机操作串行。
 - MySQL 软件上传、预检、安装、启停、GTID 复制配置、mysqldump 逻辑备份、XtraBackup 物理备份与恢复、pt-archiver 作业控制。
 - Oracle 接入、状态、Data Guard、表空间/数据文件与 RMAN；PostgreSQL 接入、状态、复制状态与 pg_dump；Doris 接入、状态与快照备份。
@@ -13,6 +13,12 @@
 - 平台 SQLite 在线快照、校验清单，以及只允许恢复到新目录的离线工具。
 
 实现与验收范围见 [验收记录](docs/acceptance.md)。完整设计是目标说明，不能视为所有条目已经实现或通过真实数据库验收。
+
+## 在线纳管主机
+
+在“资源中心 → 主机”点击“在线纳管主机”，填写目标地址、SSH 用户及密码或私钥。平台先检查 Linux、CPU 架构与 systemd，显示 SSH 主机指纹；操作者核对并确认指纹后，平台选择 AMD64 或 ARM64 Agent，远程安装 `dbops-agent.service` 并等待 Agent 主动注册。注册成功后会删除目标机上的一次性 bootstrap token，主机和 Agent 自动出现在资产列表。
+
+SSH 密码、私钥、私钥口令和 sudo 密码只存在于本次请求内，不写数据库。目标主机必须能访问配置的 `DBOPS_PUBLIC_URL`；自签名 HTTPS 可在向导中提供 CA 证书。启用强制 Agent mTLS 时，在线入口会拒绝无客户端证书的自动安装，应先按 [运维说明](docs/operations.md) 完成证书下发。
 
 ## MySQL 备份与恢复
 

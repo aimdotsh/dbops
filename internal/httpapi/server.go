@@ -18,6 +18,7 @@ import (
 	authsvc "github.com/aimdotsh/dbops/internal/auth"
 	"github.com/aimdotsh/dbops/internal/domain"
 	dorissvc "github.com/aimdotsh/dbops/internal/doris"
+	"github.com/aimdotsh/dbops/internal/hostonboarding"
 	metricstore "github.com/aimdotsh/dbops/internal/metrics"
 	"github.com/aimdotsh/dbops/internal/mysqlarchive"
 	"github.com/aimdotsh/dbops/internal/mysqlbackup"
@@ -53,6 +54,7 @@ type Server struct {
 	oracle           *oraclesvc.Service
 	postgres         *pgsvc.Service
 	doris            *dorissvc.Service
+	hostOnboarding   *hostonboarding.Service
 }
 
 func New(
@@ -75,6 +77,7 @@ func New(
 	oracleService *oraclesvc.Service,
 	postgresService *pgsvc.Service,
 	dorisService *dorissvc.Service,
+	hostOnboarding *hostonboarding.Service,
 	agentWS http.Handler,
 	websocketPath string,
 ) *Server {
@@ -87,6 +90,7 @@ func New(
 		metrics: metricsStore, alerts: alertEngine, software: softwareService,
 		mysqlInstaller: mysqlInstaller, mysqlBackup: mysqlBackup, mysqlArchive: mysqlArchive,
 		mysqlReplication: mysqlReplication, mysqlService: mysqlService, oracle: oracleService, postgres: postgresService, doris: dorisService,
+		hostOnboarding: hostOnboarding,
 	}
 
 	v1 := r.Group("/api/v1")
@@ -127,6 +131,8 @@ func New(
 
 	protected.GET("/hosts", read, s.listHosts)
 	protected.POST("/hosts", adminDBA, s.createHost)
+	protected.POST("/hosts/onboarding/precheck", adminDBA, s.precheckHostOnboarding)
+	protected.POST("/hosts/onboarding", adminDBA, s.onboardHost)
 	protected.GET("/hosts/:id", read, s.getHost)
 	protected.GET("/agents", read, s.listAgents)
 	protected.GET("/agents/:id", read, s.getAgent)
