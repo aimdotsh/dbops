@@ -11,6 +11,7 @@ const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/', component: DashboardView },
     { path: '/assets', component: AssetsView },
+    { path: '/databases/:id', component: () => import('./views/DatabaseDetailView.vue') },
     { path: '/tasks', component: TasksView },
     { path: '/schedules', component: () => import('./views/SchedulesView.vue') },
     { path: '/metrics', component: () => import('./views/MetricsView.vue') },

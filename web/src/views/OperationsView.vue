@@ -40,7 +40,7 @@ function layoutDefault(key:string){
  const paths:Record<string,string>={base_dir:`${directory}/base`,data_dir:`${directory}/data`,log_dir:`${directory}/log`,binlog_dir:`${directory}/binlog`,run_dir:`${directory}/run`,config_path:`${directory}/conf/my.cnf`,service_name:`dbops-mysql${port}.service`}
  return paths[key]||''
 }
-function reset(){Object.keys(form).forEach(k=>delete form[k]);operation.value?.fields.forEach(f=>form[f.key]=f.value??(f.type==='boolean'?false:''));error.value='';result.value=null;confirmed.value=false}
+function reset(){Object.keys(form).forEach(k=>delete form[k]);operation.value?.fields.forEach(f=>form[f.key]=f.value??(f.type==='boolean'?false:''));if(route.query.instance_id&&operation.value?.fields.some(f=>f.key==='instance_id'))form.instance_id=Number(route.query.instance_id);error.value='';result.value=null;confirmed.value=false}
 function options(f:Field){if(f.choices)return f.choices.map(v=>({id:v,label:v}));return(sources[f.source??'']??[]).filter(v=>!f.engine||v.db_type===f.engine||(f.engine==='postgres'&&v.db_type==='postgresql')).map(v=>({id:v.id,label:`#${v.id} ${v.name||v.agent_uuid||`${v.software_name} ${v.version} ${v.architecture}`}${v.status?` · ${v.status}`:''}`}))}
 async function submit(){
  if(!operation.value)return

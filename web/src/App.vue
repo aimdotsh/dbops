@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, Box, Coin, Collection, DataAnalysis, Grid, Monitor, Operation, Setting, Tickets, UserFilled } from '@element-plus/icons-vue'
+import { Bell, Box, Coin, Collection, DataAnalysis, Grid, Monitor, Operation, Search, Setting, Tickets, UserFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const globalSearch = ref('')
 const loginPage = computed(() => route.path === '/login')
 const activeMenu = computed(() => {
+  if (route.path.startsWith('/databases/')) return '/assets'
   if (route.path === '/operations') return `/operations?category=${route.query.category || 'onboarding'}`
   if (route.path === '/records') return `/records?group=${route.query.group || 'protection'}`
   return route.path
@@ -17,7 +19,11 @@ const pageName = computed(() => ({
   '/': '运行总览', '/assets': '资源中心', '/operations': '数据库服务', '/records': '数据保护与治理',
   '/metrics': '性能监控', '/alerts': '告警中心', '/tasks': '任务中心', '/schedules': '自动化策略',
   '/software': '软件仓库',
-}[route.path] || 'DBOps'))
+}[route.path] || (route.path.startsWith('/databases/') ? '数据库服务详情' : 'DBOps')))
+
+function searchResources(value: string) {
+  if (value.trim()) router.push({ path: '/assets', query: { tab: 'databases', search: value.trim() } })
+}
 
 onMounted(() => auth.loadMe().catch(() => undefined))
 
@@ -65,8 +71,13 @@ function logout() {
     </el-aside>
     <el-container>
       <el-header class="topbar">
-        <div class="topbar-title"><span>DBOps</span><i>/</i><strong>{{ pageName }}</strong></div>
+        <div class="topbar-left">
+          <div class="topbar-title"><span>DBOps</span><i>/</i><strong>{{ pageName }}</strong></div>
+          <el-input v-model="globalSearch" class="global-search" placeholder="搜索数据库、主机或任务" clearable @keyup.enter="searchResources(globalSearch)"><template #prefix><el-icon><Search /></el-icon></template></el-input>
+        </div>
         <div class="user-area">
+          <el-button class="header-action" @click="router.push('/operations?category=onboarding')">纳管</el-button>
+          <el-button type="primary" @click="router.push('/operations?category=onboarding')">+ 部署</el-button>
           <el-tag type="success" effect="plain" round>平台运行中</el-tag>
           <div class="user-avatar">{{ (auth.user?.display_name || auth.user?.username || 'D').slice(0, 1).toUpperCase() }}</div>
           <div class="user-copy"><strong>{{ auth.user?.display_name || auth.user?.username || 'DBA' }}</strong><small>{{ auth.user?.roles?.join(' · ') || 'Administrator' }}</small></div>

@@ -4,11 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { getData } from '../api'
 
 const route=useRoute(),router=useRouter()
-const tab=ref(String(route.query.tab||'databases')),search=ref(''),engine=ref('')
+const tab=ref(String(route.query.tab||'databases')),search=ref(String(route.query.search||'')),engine=ref('')
 const hosts=ref<any[]>([]),agents=ref<any[]>([]),databases=ref<any[]>([]),loading=ref(true)
 const onlineAgents=computed(()=>agents.value.filter(x=>x.status==='online').length)
 const onlineDBs=computed(()=>databases.value.filter(x=>['online','healthy','running'].includes(String(x.status).toLowerCase())).length)
 const engines=computed(()=>[...new Set(databases.value.map(x=>x.db_type))])
+const engineFilters=computed(()=>['',...engines.value])
 const filteredDatabases=computed(()=>databases.value.filter(x=>(!engine.value||x.db_type===engine.value)&&(!search.value||`${x.name} ${x.version} ${x.port}`.toLowerCase().includes(search.value.toLowerCase()))))
 const filteredHosts=computed(()=>hosts.value.filter(x=>!search.value||`${x.hostname} ${x.ip_address}`.toLowerCase().includes(search.value.toLowerCase())))
 const filteredAgents=computed(()=>agents.value.filter(x=>!search.value||`${x.agent_uuid} ${x.architecture}`.toLowerCase().includes(search.value.toLowerCase())))
@@ -30,13 +31,14 @@ onMounted(async()=>{try{[hosts.value,agents.value,databases.value]=await Promise
   <el-card shadow="never" class="surface-card" v-loading="loading">
    <el-tabs v-model="tab" @tab-change="changeTab">
     <el-tab-pane label="数据库实例" name="databases">
+     <div class="engine-switch"><button v-for="item in engineFilters" :key="item||'all'" :class="{active:engine===item}" @click="engine=item">{{item||'全部引擎'}}</button></div>
      <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索实例名称、版本或端口" style="width:300px"/><el-select v-model="engine" clearable placeholder="全部引擎" style="width:160px"><el-option v-for="item in engines" :key="item" :label="item" :value="item"/></el-select><span class="muted">共 {{filteredDatabases.length}} 个实例</span></div>
      <el-table :data="filteredDatabases">
-      <el-table-column prop="name" label="实例名称" min-width="170"><template #default="{row}"><strong>{{row.name}}</strong><div class="muted">ID {{row.id}}</div></template></el-table-column>
+      <el-table-column prop="name" label="实例名称" min-width="190"><template #default="{row}"><el-button link type="primary" class="instance-link" @click="router.push(`/databases/${row.id}`)">{{row.name}}</el-button><div class="muted">ID {{row.id}}</div></template></el-table-column>
       <el-table-column prop="db_type" label="引擎" width="115"/><el-table-column prop="version" label="版本" min-width="140"/><el-table-column prop="role" label="角色" width="110"/><el-table-column prop="port" label="端口" width="90"/>
       <el-table-column label="运行状态" width="115"><template #default="{row}"><el-tag :type="tagType(row.status)" effect="light">{{row.status}}</el-tag></template></el-table-column>
       <el-table-column prop="managed_mode" label="接入方式" width="120"/>
-      <el-table-column label="操作" width="150" fixed="right"><template #default><el-button link type="primary" @click="router.push('/operations?category=lifecycle')">实例操作</el-button><el-button link @click="router.push('/metrics')">监控</el-button></template></el-table-column>
+      <el-table-column label="操作" width="190" fixed="right"><template #default="{row}"><el-button link type="primary" @click="router.push(`/databases/${row.id}`)">详情</el-button><el-button link @click="router.push(`/operations?category=lifecycle&instance_id=${row.id}`)">运维</el-button><el-button link @click="router.push(`/metrics?resource=database&id=${row.id}`)">性能</el-button></template></el-table-column>
      </el-table><el-empty v-if="!filteredDatabases.length" description="暂无数据库实例，点击右上角开始接入"/>
     </el-tab-pane>
     <el-tab-pane label="主机" name="hosts">
