@@ -1,16 +1,38 @@
 <script setup lang="ts">
-import {computed, onMounted, reactive, ref} from 'vue'
-import {useRouter} from 'vue-router'
+import {computed, onMounted, reactive, ref, watch} from 'vue'
+import {useRoute, useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
 import {api,getData} from '../api'
 import {useAuthStore} from '../stores/auth'
-import {operations, type Field} from '../operations'
-const auth=useAuthStore(),router=useRouter()
-const available=computed(()=>operations.filter(o=>o.roles.some(r=>auth.user?.roles?.includes(r))))
+import {operations, type Field, type Operation} from '../operations'
+
+const auth=useAuthStore(),route=useRoute(),router=useRouter()
 const selected=ref(''),busy=ref(false),error=ref(''),result=ref<any>(null),confirmed=ref(false)
 const form=reactive<Record<string,any>>({})
 const sources=reactive<Record<string,any[]>>({agents:[],packages:[],databases:[]})
+const categories=[
+ {key:'onboarding',label:'接入与部署',hint:'安装新实例或纳管已有数据库'},
+ {key:'lifecycle',label:'实例生命周期',hint:'启停、重启与容量管理'},
+ {key:'protection',label:'备份与恢复',hint:'创建备份并执行受控恢复'},
+ {key:'ha',label:'高可用与归档',hint:'复制拓扑与数据归档'},
+ {key:'governance',label:'平台治理',hint:'用户、项目、环境和资源授权'},
+]
+const category=ref(String(route.query.category||'onboarding'))
+const available=computed(()=>operations.filter(o=>o.roles.some(r=>auth.user?.roles?.includes(r))))
+function categoryOf(o:Operation){
+ if(['/projects','/environments','/resource-scopes','/users'].includes(o.path)||o.name==='创建平台快照')return 'governance'
+ if(o.path.includes('/backups')||o.path.includes('/restores'))return 'protection'
+ if(o.path.includes('/replications')||o.path.includes('/archive'))return 'ha'
+ if(o.path.includes('/start')||o.path.includes('/stop')||o.path.includes('/restart')||o.path.includes('datafiles'))return 'lifecycle'
+ return 'onboarding'
+}
+const categoryOperations=computed(()=>available.value.filter(o=>categoryOf(o)===category.value))
 const operation=computed(()=>available.value.find(o=>o.name===selected.value))
+const currentCategory=computed(()=>categories.find(x=>x.key===category.value)??categories[0])
+const operationHint=(o:Operation)=>o.risk?'高风险变更，提交前需要确认':o.path.includes('precheck')?'只读检查，不修改数据库':o.path.includes('backups')?'创建可追踪的备份任务':'通过持久任务安全执行'
+function selectCategory(key:string){category.value=key;router.replace({query:{...route.query,category:key}});selectFirst()}
+function selectFirst(){selected.value=categoryOperations.value[0]?.name??'';reset()}
+function selectOperation(name:string){selected.value=name;reset()}
 function layoutDefault(key:string){
  if(!['/mysql/install','/mysql/precheck'].includes(operation.value?.path??''))return ''
  const root=String(form.install_root||'/opt/dbops').replace(/\/+$/,'')
@@ -37,26 +59,39 @@ async function submit(){
   ElMessage.success(response.status===202?'任务已提交，可在任务中心跟踪':'操作成功')
  }catch(e:any){error.value=e.response?.data?.message||e.message}finally{busy.value=false}
 }
-onMounted(async()=>{try{await auth.loadMe();const [agents,packages,databases]=await Promise.all([getData<any[]>('/agents'),getData<any[]>('/software/packages'),getData<any[]>('/databases')]);Object.assign(sources,{agents:agents??[],packages:packages??[],databases:databases??[]});selected.value=available.value[0]?.name??'';reset()}catch(e:any){error.value=e.message}})
+watch(()=>route.query.category,(value)=>{const next=String(value||'onboarding');if(next!==category.value){category.value=next;selectFirst()}})
+onMounted(async()=>{try{await auth.loadMe();const [agents,packages,databases]=await Promise.all([getData<any[]>('/agents'),getData<any[]>('/software/packages'),getData<any[]>('/databases')]);Object.assign(sources,{agents:agents??[],packages:packages??[],databases:databases??[]});selectFirst()}catch(e:any){error.value=e.message}})
 </script>
 <template>
- <div class="page-title"><div><h2>数据库操作</h2><p>选择目标并提交任务；执行步骤和结果保存在任务中心。</p></div></div>
- <el-card shadow="never" style="max-width:900px">
-  <el-empty v-if="!available.length" description="当前角色没有数据库变更权限" />
-  <el-form v-else label-position="top" @submit.prevent="submit">
-   <el-form-item label="操作"><el-select v-model="selected" @change="reset" style="width:100%"><el-option v-for="o in available" :key="o.name" :label="o.name" :value="o.name" /></el-select></el-form-item>
-   <el-form-item v-for="f in operation?.fields" :key="f.key" :label="f.label" :required="f.required">
-    <el-select v-if="f.type==='select'" v-model="form[f.key]" filterable style="width:100%"><el-option v-for="o in options(f)" :key="o.id" :value="o.id" :label="o.label" /></el-select>
-    <el-switch v-else-if="f.type==='boolean'" v-model="form[f.key]" />
-    <el-input-number v-else-if="f.type==='number'" v-model="form[f.key]" :min="0" :precision="0" style="width:100%" />
-    <el-input v-else v-model="form[f.key]" :placeholder="layoutDefault(f.key)" :type="f.type==='password'?'password':'text'" :show-password="f.type==='password'" autocomplete="off" />
-    <small v-if="layoutDefault(f.key)" class="muted">留空使用 {{layoutDefault(f.key)}}</small>
-   </el-form-item>
-   <el-alert v-if="operation?.risk" :title="operation.risk" type="warning" :closable="false" show-icon />
-   <el-checkbox v-if="operation?.risk" v-model="confirmed">我已核对目标并确认执行此操作</el-checkbox>
-   <el-alert v-if="error" :title="error" type="error" :closable="false" />
-   <div style="margin-top:20px"><el-button type="primary" native-type="submit" :loading="busy" :disabled="!!operation?.risk&&!confirmed">提交</el-button><el-button v-if="result?.task_type" @click="router.push({path:'/tasks',query:{id:result.id}})">查看任务 #{{result.id}}</el-button></div>
-   <el-alert v-if="result" :title="result.task_type?`任务 #${result.id} 已提交：${result.status}`:`已保存 #${result.id}`" type="success" :closable="false" style="margin-top:16px" />
-  </el-form>
- </el-card>
+ <div class="page-title"><div><h2>数据库服务</h2><p>按照 DBA 工作流选择操作，所有变更进入任务中心跟踪与审计</p></div><div class="page-actions"><el-button @click="router.push('/assets')">查看资源</el-button><el-button @click="router.push('/tasks')">任务中心</el-button></div></div>
+ <div class="category-list"><button v-for="item in categories" :key="item.key" class="category-button" :class="{active:category===item.key}" @click="selectCategory(item.key)">{{item.label}}</button></div>
+ <div class="operation-layout">
+  <div>
+   <div style="margin-bottom:13px"><h3 class="section-title">{{currentCategory.label}}</h3><p class="section-subtitle">{{currentCategory.hint}} · {{categoryOperations.length}} 项可用操作</p></div>
+   <el-empty v-if="!categoryOperations.length" description="当前角色没有此类操作权限" />
+   <div v-else class="operation-list">
+    <div v-for="o in categoryOperations" :key="o.name" class="operation-item" :class="{active:selected===o.name}" @click="selectOperation(o.name)">
+     <div style="display:flex;justify-content:space-between;gap:10px"><strong>{{o.name}}</strong><el-tag v-if="o.risk" type="warning" size="small" effect="plain">需确认</el-tag><el-tag v-else type="info" size="small" effect="plain">标准</el-tag></div>
+     <p>{{operationHint(o)}}</p>
+    </div>
+   </div>
+  </div>
+  <el-card v-if="operation" shadow="never" class="surface-card operation-form-card">
+   <div class="operation-form-head"><h3>{{operation.name}}</h3><p>填写目标与参数后提交，执行过程会记录步骤、事件和结果。</p></div>
+   <el-form label-position="top" @submit.prevent="submit">
+    <el-form-item v-for="f in operation.fields" :key="f.key" :label="f.label" :required="f.required">
+     <el-select v-if="f.type==='select'" v-model="form[f.key]" filterable style="width:100%"><el-option v-for="o in options(f)" :key="o.id" :value="o.id" :label="o.label" /></el-select>
+     <el-switch v-else-if="f.type==='boolean'" v-model="form[f.key]" />
+     <el-input-number v-else-if="f.type==='number'" v-model="form[f.key]" :min="0" :precision="0" style="width:100%" />
+     <el-input v-else v-model="form[f.key]" :placeholder="layoutDefault(f.key)" :type="f.type==='password'?'password':'text'" :show-password="f.type==='password'" autocomplete="off" />
+     <small v-if="layoutDefault(f.key)" class="muted">留空使用 {{layoutDefault(f.key)}}</small>
+    </el-form-item>
+    <el-alert v-if="operation.risk" :title="operation.risk" type="warning" :closable="false" show-icon />
+    <el-checkbox v-if="operation.risk" v-model="confirmed" style="margin-top:12px">我已核对目标并确认执行此操作</el-checkbox>
+    <el-alert v-if="error" :title="error" type="error" :closable="false" style="margin-top:12px" />
+    <div style="margin-top:20px"><el-button type="primary" native-type="submit" :loading="busy" :disabled="!!operation.risk&&!confirmed">提交操作</el-button><el-button v-if="result?.task_type" @click="router.push({path:'/tasks',query:{id:result.id}})">查看任务 #{{result.id}}</el-button></div>
+    <el-alert v-if="result" :title="result.task_type?`任务 #${result.id} 已提交：${result.status}`:`已保存 #${result.id}`" type="success" :closable="false" style="margin-top:16px" />
+   </el-form>
+  </el-card>
+ </div>
 </template>
