@@ -20,6 +20,8 @@
 
 SSH 密码、私钥、私钥口令和 sudo 密码只存在于本次请求内，不写数据库。目标主机必须能访问配置的 `DBOPS_PUBLIC_URL`；自签名 HTTPS 可在向导中提供 CA 证书。启用强制 Agent mTLS 时，在线入口会拒绝无客户端证书的自动安装，应先按 [运维说明](docs/operations.md) 完成证书下发。
 
+外网主机无法使用本地 demo 的 `http://127.0.0.1:18089` 作为平台访问地址。先通过私有网络（例如双方加入同一 tailnet 并在平台侧提供 HTTPS 服务）或受控的公网 HTTPS 入口打通连接，再在向导中点击“从目标主机验证平台连通性”；检查成功后才可安装 Agent。主机指纹应从云厂商控制台进入目标主机，执行向导显示的 `ssh-keygen` 命令独立核对。
+
 ## MySQL 备份与恢复
 
 MySQL 备份可选择 `mysqldump` 或 `xtrabackup`。物理备份需在 Agent 主机上安装或解包兼容的 XtraBackup，并在请求中指定 `tool_path`（默认 `/usr/bin/xtrabackup`）。备份记录包含引擎、路径、大小和校验摘要；物理备份的全文件摘要在 prepare 前校验。

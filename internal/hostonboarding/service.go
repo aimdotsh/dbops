@@ -3,12 +3,16 @@ package hostonboarding
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -64,8 +68,14 @@ type PrecheckResult struct {
 	AgentArchitecture  string `json:"agent_architecture"`
 	HasSystemd         bool   `json:"has_systemd"`
 	CanElevate         bool   `json:"can_elevate"`
+	HostKeyAlgorithm   string `json:"host_key_algorithm"`
 	HostKeyFingerprint string `json:"host_key_fingerprint"`
 	DefaultServerURL   string `json:"default_server_url"`
+}
+
+type ConnectivityResult struct {
+	ServerURL string `json:"server_url"`
+	Reachable bool   `json:"reachable"`
 }
 
 type OnboardResult struct {
@@ -129,9 +139,10 @@ func (s *Service) Precheck(ctx context.Context, req Request) (PrecheckResult, er
 	if err := validateConnection(req); err != nil {
 		return PrecheckResult{}, err
 	}
-	var fingerprint string
+	var fingerprint, hostKeyAlgorithm string
 	client, err := dial(ctx, req, func(key ssh.PublicKey) error {
 		fingerprint = ssh.FingerprintSHA256(key)
+		hostKeyAlgorithm = key.Type()
 		return nil
 	})
 	if err != nil {
@@ -153,7 +164,7 @@ func (s *Service) Precheck(ctx context.Context, req Request) (PrecheckResult, er
 	result := PrecheckResult{
 		Address: req.Address, OperatingSystem: probe.os, Architecture: probe.arch,
 		Hostname: probe.hostname, HasSystemd: probe.systemctl != "", CanElevate: probe.elevation != "password" || req.SudoPassword != "" || req.Password != "",
-		AgentArchitecture: arch, HostKeyFingerprint: fingerprint, DefaultServerURL: s.cfg.PublicURL,
+		AgentArchitecture: arch, HostKeyAlgorithm: hostKeyAlgorithm, HostKeyFingerprint: fingerprint, DefaultServerURL: s.cfg.PublicURL,
 	}
 	if !strings.EqualFold(result.OperatingSystem, "Linux") {
 		return PrecheckResult{}, ValidationError{Message: "当前仅支持在线纳管 Linux 主机"}
@@ -219,6 +230,9 @@ func (s *Service) Onboard(ctx context.Context, req Request) (OnboardResult, erro
 
 	info, err := s.remoteInfo(client)
 	if err != nil {
+		return OnboardResult{}, err
+	}
+	if err := checkServerReachability(client, serverURL, req.CACertificate); err != nil {
 		return OnboardResult{}, err
 	}
 	binaryPath := filepath.Join(s.cfg.InstallerRoot, "linux-"+info.arch, "dbops-agent")
@@ -333,6 +347,100 @@ WantedBy=multi-user.target
 		result.BootstrapRemoved = cleanupErr == nil
 	}
 	return result, nil
+}
+
+func (s *Service) CheckConnectivity(ctx context.Context, req Request) (ConnectivityResult, error) {
+	if err := validateConnection(req); err != nil {
+		return ConnectivityResult{}, err
+	}
+	if !req.Confirmed || req.HostKeyFingerprint == "" {
+		return ConnectivityResult{}, ValidationError{Message: "必须先完成预检并确认 SSH 主机指纹"}
+	}
+	serverURL := strings.TrimSpace(req.ServerURL)
+	if err := validateServerURL(serverURL); err != nil {
+		return ConnectivityResult{}, err
+	}
+	client, err := dial(ctx, req, func(key ssh.PublicKey) error {
+		actual := ssh.FingerprintSHA256(key)
+		if actual != req.HostKeyFingerprint {
+			return fmt.Errorf("SSH 主机指纹已变化，期望 %s，实际 %s", req.HostKeyFingerprint, actual)
+		}
+		return nil
+	})
+	if err != nil {
+		return ConnectivityResult{}, fmt.Errorf("SSH 连接失败: %w", err)
+	}
+	defer client.Close()
+	if err := checkServerReachability(client, serverURL, req.CACertificate); err != nil {
+		return ConnectivityResult{}, err
+	}
+	return ConnectivityResult{ServerURL: serverURL, Reachable: true}, nil
+}
+
+func checkServerReachability(client *ssh.Client, serverURL, caCertificate string) error {
+	if err := validateServerURL(serverURL); err != nil {
+		return err
+	}
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if strings.TrimSpace(caCertificate) != "" {
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM([]byte(caCertificate)) {
+			return ValidationError{Message: "平台 CA 证书格式无效"}
+		}
+		tlsConfig.RootCAs = roots
+	}
+	healthURL := strings.TrimRight(serverURL, "/") + "/api/v1/health"
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			type dialResult struct {
+				conn net.Conn
+				err  error
+			}
+			result := make(chan dialResult, 1)
+			go func() {
+				conn, err := client.Dial(network, addr)
+				result <- dialResult{conn: conn, err: err}
+			}()
+			select {
+			case item := <-result:
+				return item.conn, item.err
+			case <-ctx.Done():
+				go func() {
+					if item := <-result; item.conn != nil {
+						_ = item.conn.Close()
+					}
+				}()
+				return nil, ctx.Err()
+			}
+		},
+	}
+	defer transport.CloseIdleConnections()
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return errors.New("平台健康接口不应重定向")
+		},
+	}
+	resp, err := httpClient.Get(healthURL)
+	if err != nil {
+		return ValidationError{Message: "目标主机无法访问平台地址，请配置公网 HTTPS 地址或双方可达的私有网络后重试。详情: " + err.Error()}
+	}
+	defer resp.Body.Close()
+	var health struct {
+		Code string `json:"code"`
+		Data struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&health) != nil || health.Code != "OK" || health.Data.Status != "up" {
+		return ValidationError{Message: "目标主机访问的平台地址未返回 DBOps 健康响应，请核对平台访问地址"}
+	}
+	return nil
 }
 
 type remoteDetails struct{ hostname, arch string }

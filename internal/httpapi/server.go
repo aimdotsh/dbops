@@ -132,6 +132,7 @@ func New(
 	protected.GET("/hosts", read, s.listHosts)
 	protected.POST("/hosts", adminDBA, s.createHost)
 	protected.POST("/hosts/onboarding/precheck", adminDBA, s.precheckHostOnboarding)
+	protected.POST("/hosts/onboarding/connectivity", adminDBA, s.checkHostOnboardingConnectivity)
 	protected.POST("/hosts/onboarding", adminDBA, s.onboardHost)
 	protected.GET("/hosts/:id", read, s.getHost)
 	protected.GET("/agents", read, s.listAgents)

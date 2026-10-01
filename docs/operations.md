@@ -6,7 +6,7 @@
 
 普通 Linux 主机可在“资源中心 → 主机 → 在线纳管主机”完成安装，也可调用 `POST /api/v1/hosts/onboarding/precheck` 后再调用 `POST /api/v1/hosts/onboarding`。预检使用 SSH 读取操作系统、架构、主机名和 systemd，并返回 SHA256 主机密钥指纹。正式安装必须原样提交该指纹和 `confirmed=true`；指纹发生变化会终止连接。平台按目标架构安装内置的 AMD64/ARM64 Agent，创建 `/etc/dbops-agent`、`/var/lib/dbops-agent`、`/var/log/dbops-agent` 和 `dbops-agent.service`，随后等待 Agent 注册。确认 Agent 已保存独立持久凭据后，平台删除目标机上的一次性 bootstrap token。
 
-在线纳管支持 SSH 密码和 PEM/OpenSSH 私钥，非 root 用户使用 sudo。SSH 密码、私钥、口令及 sudo 密码只在请求内使用，不保存、不进入任务记录。`server_url` 必须是目标主机可达的平台 HTTP/HTTPS 地址，通常与 `DBOPS_PUBLIC_URL` 一致；自签名 HTTPS 需一并提供 CA。强制 mTLS 模式需要每台 Agent 的独立客户端证书，当前在线入口不会代签或传输该证书，因此会拒绝自动安装，须使用下方手工流程。在线安装是同步的受审计管理操作；若 HTTP 请求中断，应先在目标主机检查 `systemctl status dbops-agent`，再决定重试，避免把网络超时误判为未安装。
+在线纳管支持 SSH 密码和 PEM/OpenSSH 私钥，非 root 用户使用 sudo。SSH 密码、私钥、口令及 sudo 密码只在请求内使用，不保存、不进入任务记录。`server_url` 必须是目标主机可达的平台 HTTP/HTTPS 地址，通常与 `DBOPS_PUBLIC_URL` 一致；自签名 HTTPS 需一并提供 CA。预检后先调用 `POST /api/v1/hosts/onboarding/connectivity`，平台通过 SSH 转发让目标主机连接平台健康接口，成功后才安装；正式安装会再次检查，避免仅凭填写地址就留下离线 Agent。强制 mTLS 模式需要每台 Agent 的独立客户端证书，当前在线入口不会代签或传输该证书，因此会拒绝自动安装，须使用下方手工流程。在线安装是同步的受审计管理操作；若 HTTP 请求中断，应先在目标主机检查 `systemctl status dbops-agent`，再决定重试，避免把网络超时误判为未安装。
 
 安装数据库需要 Agent 对安装目录和系统服务具备相应权限。先使用专用测试主机；安装不会覆盖已有配置、非空数据目录或已有任务 marker。失败后需要检查现场，不会自动删除数据库文件或重复初始化。
 

@@ -88,10 +88,12 @@ body { margin: 0; min-width: 1024px; background: #f5f7fa; }
 .fingerprint-box { display:grid; gap:9px; padding:15px 17px; border:1px solid #dce9e6; background:#f5fbfa; border-radius:9px; }
 .fingerprint-box span { color:#52616d; font-size:12px; font-weight:650; }
 .fingerprint-box code { color:#176f65; font-size:12px; overflow-wrap:anywhere; }
+.fingerprint-box small { color:var(--muted); font-size:11px; }
 .onboarding-success { text-align:center; padding:24px 0 12px; }
 .onboarding-success .success-mark { width:58px; height:58px; margin:0 auto 14px; border-radius:50%; display:grid; place-items:center; color:#fff; background:var(--brand); font-size:30px; }
 .onboarding-success h3 { margin:0 0 8px; }
 .onboarding-success p { color:var(--muted); margin:0 0 22px; }
+.connectivity-check { display:flex; align-items:center; gap:12px; margin:0 0 8px; }
 .engine-switch { display:flex; gap:2px; border-bottom:1px solid var(--line); margin:-4px 0 16px; overflow-x:auto; }
 .engine-switch button { border:0; border-bottom:2px solid transparent; background:transparent; padding:10px 15px; color:#5f6b76; cursor:pointer; text-transform:capitalize; }
 .engine-switch button:hover { color:var(--brand-deep); }

@@ -5,6 +5,7 @@
 | 方法与路径 | 用途 | 角色 |
 |---|---|---|
 | POST /hosts/onboarding/precheck | 使用一次性 SSH 凭据检查 Linux/systemd/架构并返回主机指纹 | DBA / SuperAdmin |
+| POST /hosts/onboarding/connectivity | 从目标主机检查 server_url 的平台健康接口能否访问；需 confirmed 和主机指纹 | DBA / SuperAdmin |
 | POST /hosts/onboarding | 提交已确认指纹，安装并注册 Agent | DBA / SuperAdmin |
 | POST /mysql/precheck | agent_id 与预检参数，创建只读任务 | DBA / SuperAdmin |
 | POST /mysql/restores | backup_id、target_instance_id、confirmed:true | DBA / SuperAdmin |
