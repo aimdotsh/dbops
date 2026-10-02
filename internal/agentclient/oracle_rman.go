@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,7 +37,7 @@ func oracleRMANBackup(ctx context.Context, workDir string, params map[string]any
 	if strings.ContainsAny(outputDir, "'\"\r\n\x00") {
 		return nil, errors.New("output_dir contains forbidden characters")
 	}
-	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+	if err := prepareOracleBackupDir(home, outputDir); err != nil {
 		return nil, err
 	}
 
@@ -145,6 +146,47 @@ func oracleRMANBackup(ctx context.Context, workDir string, params map[string]any
 		"log_path":        logPath,
 		"completed_at":    time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+// RMAN starts as the Agent user, but the Oracle server process writes backup
+// pieces as the owner of the Oracle binary. Give only newly created directories
+// to that user; never change the ownership of an existing backup directory.
+func prepareOracleBackupDir(home, outputDir string) error {
+	oracleBinary, err := os.Stat(filepath.Join(home, "bin", "oracle"))
+	if err != nil {
+		return fmt.Errorf("stat Oracle executable: %w", err)
+	}
+	owner, ok := oracleBinary.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("cannot determine Oracle OS user")
+	}
+
+	var missing []string
+	for dir := filepath.Clean(outputDir); ; dir = filepath.Dir(dir) {
+		info, err := os.Lstat(dir)
+		if err == nil {
+			if !info.IsDir() {
+				return fmt.Errorf("backup path component is not a directory: %s", dir)
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect backup directory: %w", err)
+		}
+		missing = append(missing, dir)
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		dir := missing[i]
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			return fmt.Errorf("create backup directory %s: %w", dir, err)
+		}
+		if uint32(os.Geteuid()) != owner.Uid || uint32(os.Getegid()) != owner.Gid {
+			if err := os.Chown(dir, int(owner.Uid), int(owner.Gid)); err != nil {
+				return fmt.Errorf("give backup directory %s to Oracle OS user: %w", dir, err)
+			}
+		}
+	}
+	return nil
 }
 
 func tailFile(path string, max int) string {
