@@ -149,14 +149,17 @@ func oracleRMANBackup(ctx context.Context, workDir string, params map[string]any
 }
 
 // RMAN starts as the Agent user, but the Oracle server process writes backup
-// pieces as the owner of the Oracle binary. Give only newly created directories
+// pieces as the Oracle home owner. Give only newly created directories
 // to that user; never change the ownership of an existing backup directory.
 func prepareOracleBackupDir(home, outputDir string) error {
-	oracleBinary, err := os.Stat(filepath.Join(home, "bin", "oracle"))
+	oracleHome, err := os.Stat(home)
 	if err != nil {
-		return fmt.Errorf("stat Oracle executable: %w", err)
+		return fmt.Errorf("stat Oracle home: %w", err)
 	}
-	owner, ok := oracleBinary.Sys().(*syscall.Stat_t)
+	if !oracleHome.IsDir() {
+		return errors.New("Oracle home is not a directory")
+	}
+	owner, ok := oracleHome.Sys().(*syscall.Stat_t)
 	if !ok {
 		return errors.New("cannot determine Oracle OS user")
 	}
