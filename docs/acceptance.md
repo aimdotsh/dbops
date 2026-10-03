@@ -16,7 +16,8 @@
 | XtraBackup 物理基线 | 官方 Percona `8.0.35-36-1.noble_arm64` 包在两台 ARM64 主机解包验证；clp01 对 13307 完成在线备份和 `--prepare`，传输到 clp02 后 `--copy-back` 恢复至 13311，systemd 启动并核对六条记录一致；平台任务 42/45 已在双机生成全文件摘要备份；任务 44/46 完成 prepare 与暂存 copy-back，等待人工切换（旧任务 43 摘要未覆盖全文件，已更正） |
 | pt-archiver 双机归档 | clp01 主库真实 pt-archiver 3.2.1 将隔离表 100+20 行移至归档表，从库逐项追平；任务 56/58 暂停续跑 40 行无重复；负载超限、复制线程停止的前置保护拒绝启动；任务 59/61 在运行中停止复制后主动停止，源/归档合计各 40 行，任务 62 人工核查后新建作业处理余下 10 行，主从一致 |
 | tx50 Oracle 与 MySQL | CentOS 7.6 x86_64 上安装 Oracle 19.3 `dbops` 和 MySQL 8.0.46 `13307`；Oracle 状态、表空间、数据文件新增与扩容、RMAN 全量及归档备份通过，服务保持禁用自启。平台另安装 MySQL `13308` 并手工导入 GTID 基线完成同机复制；`13309` 通过平台任务自动导入 GTID 基线建立第二条复制关系。复制线程、数据、从库重启及只读验证通过。详见 [专项验收记录](tx50-oracle-mysql-acceptance-20261003.md) |
-| tx180 在线纳管 | OpenCloudOS 9.4 x86_64 主机（平台主机/Agent #74）通过 SSH 指纹和目标机到平台健康接口检查后纳管；Agent 自启、`host.info` 任务回读和 bootstrap token 清理均通过。根分区剩余约 5.6 GiB，因此未安装 MySQL 或修改既有 Docker 服务 |
+| tx180 在线纳管 | OpenCloudOS 9.4 x86_64 主机（平台主机/Agent #74）通过 SSH 指纹和目标机到平台健康接口检查后纳管；Agent 自启、`host.info` 任务回读和 bootstrap token 清理均通过。用户清理后根分区约有 8.7 GiB 空间，可供后续测试；既有 Docker 服务未改动 |
+| tx124 跨主机 MySQL 恢复 | Ubuntu 24.04.4 x86_64 主机（平台主机/Agent #76）通过在线纳管接入。tx50 的 `dbops_test` 经 mysqldump、跨 Agent 传输和平台新主机恢复，自动安装为 tx124 的 MySQL 8.0.46 实例 #5（端口 13310）。源、目标各有相同的 5 条记录，新库 UUID 不同；平台重启后再次备份，5 条记录保持一致。既有 MySQL 3319 保持运行。详见 [跨主机验收记录](tx124-cross-host-acceptance-20261003.md) |
 | 恢复范围限制 | 拒绝 all_databases、MySQL 系统 schema 和未知备份范围；只允许显式用户库进入运行时检查 |
 | 任务可靠性 | 并发领取唯一性、所有权完成、续租、停机中断、过期恢复，以及周期备份提交后宕机的幂等测试通过 |
 | 平台快照 | WAL 数据保存、完整性与摘要校验、恢复到新目录、拒绝已有目标、拒绝篡改通过 |
@@ -29,7 +30,7 @@
 
 自动化入口：`.github/workflows/hardening-ci.yml` 和 `scripts/test-real-mysql.sh`。开发环境的详细日志存于忽略目录 `.local-test/`，不把临时数据库、测试密钥、二进制或日志提交到仓库。
 
-双机故障、逻辑备份恢复和平台任务中断验收见 [真实环境验收报告](real-environment-acceptance-20260920.md)。Oracle 与 MySQL 同机主从实测见 [tx50 验收记录](tx50-oracle-mysql-acceptance-20261003.md)。
+双机故障、逻辑备份恢复和平台任务中断验收见 [真实环境验收报告](real-environment-acceptance-20260920.md)。Oracle 与 MySQL 同机主从实测见 [tx50 验收记录](tx50-oracle-mysql-acceptance-20261003.md)；tx50 到 tx124 的跨主机恢复见 [专项记录](tx124-cross-host-acceptance-20261003.md)。
 
 ## 实现边界和仍需完成的设计项
 

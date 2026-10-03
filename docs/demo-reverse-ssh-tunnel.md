@@ -40,7 +40,7 @@ ssh tx50 'systemctl is-active dbops-agent.service'
 
 ## tx180 测试主机
 
-`tx180`（OpenCloudOS 9.4，x86_64）已在 2026-10-03 通过在线向导纳管，平台主机和 Agent 均为 #74。Agent 服务 `dbops-agent.service` 已启用并在线，一次性 bootstrap token 已删除。它使用与 `tx50` 不同的远端回环端口：
+`tx180`（OpenCloudOS 9.4，x86_64）已在 2026-10-03 通过在线向导纳管，平台主机和 Agent 均为 #74。Agent 服务 `dbops-agent.service` 已启用，一次性 bootstrap token 已删除。它使用与 `tx50` 不同的远端回环端口：
 
 ```sh
 ssh -o BatchMode=yes \
@@ -49,4 +49,17 @@ ssh -o BatchMode=yes \
   -N -R 127.0.0.1:18090:127.0.0.1:18089 tx180
 ```
 
-用 `ssh tx180 'curl -fsS http://127.0.0.1:18090/api/v1/health'` 核对隧道，再在资源中心确认 Agent 在线。断线后重新运行上述命令，Agent 会使用持久凭据重连。tx180 原有 Docker 应用未改动；根分区仅余约 5.6 GiB（使用率 91%），当前只作主机纳管测试，不在其上部署 MySQL 副本。
+用 `ssh tx180 'curl -fsS http://127.0.0.1:18090/api/v1/health'` 核对隧道，再在资源中心确认 Agent 在线。断线后重新运行上述命令，Agent 会使用持久凭据重连。tx180 原有 Docker 应用未改动。用户清理空间后，2026-10-03 复查根分区剩余约 8.7 GiB（使用率 86%），可用于后续测试；安装前仍需核对内存、swap 和目标实例所需空间。
+
+## tx124 测试主机
+
+`tx124`（Ubuntu 24.04.4，x86_64）的平台主机和 Agent 均为 #76。`dbops-agent.service` 已启用，并使用持久凭据。演示平台的软件包下载地址使用 18089，因此 tx124 的远端监听端口也必须是 18089：
+
+```sh
+ssh -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -N -R 127.0.0.1:18089:127.0.0.1:18089 tx124
+```
+
+用 `ssh tx124 'curl -fsS http://127.0.0.1:18089/api/v1/health'` 验证。tx50 和 tx124 是不同主机，可分别监听各自的远端 18089。Agent 断线后重新建立隧道即可重连。tx124 上的跨主机 MySQL 恢复结果见 [验收记录](tx124-cross-host-acceptance-20261003.md)。

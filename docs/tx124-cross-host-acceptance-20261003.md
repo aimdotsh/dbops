@@ -1,0 +1,27 @@
+# tx50 到 tx124 的 MySQL 跨主机恢复验收
+
+记录日期：2026-10-03。源主机为 `tx50`（CentOS 7.6，x86_64），目标主机为 `tx124`（Ubuntu 24.04.4，x86_64）。这次使用本地演示平台和两台测试主机，验证 MySQL 逻辑备份经两个 Agent 传输后，在新主机自动安装并恢复。
+
+## 主机与连接
+
+`tx124` 的 SSH 主机指纹为 `SHA256:9UPYXh5MMLlgq4ZbATT5JLjXb/0fHUq2Tfk96xuUcYQ`。纳管前在目标机读取 SSH host key 并核对指纹。平台主机和 Agent 均为 #76，`dbops-agent.service` 已启用。Agent 使用持久凭据连接本地演示平台，一次性 bootstrap token 已删除。平台地址经 [SSH 反向隧道](demo-reverse-ssh-tunnel.md)提供。
+
+目标机原有的 `aim-mysql-3319.service` 继续运行。本次新实例只使用端口 13310，位于 `/opt/dbops/mysql/13310`，服务为 `dbops-mysql13310.service`。安装前确认端口空闲、根分区约有 31 GiB 可用空间，并为新实例设置 128 MiB Buffer Pool 和 50 个最大连接。
+
+## 任务和结果
+
+| 项目 | 结果 |
+|---|---|
+| 源库逻辑备份 | tx50 的 MySQL 实例 #2 经平台任务 #22 备份 `dbops_test`；备份记录 #7 为 903 字节的 gzip 文件，SHA256 为 `61ee7e09b7b6b8ef9528916e114d2c9653e9c552d7ea1a0c34095ddc5059c44d` |
+| 新主机恢复 | 选择备份 #7、目标 Agent #76 和 MySQL 8.0.46 软件包 #2；任务 #25 经两个 Agent 传输并校验备份，在 tx124 安装和启动实例 #5，无需原主机恢复的人工确认 |
+| 数据核对 | 任务 #26 从实例 #5 再次备份 `dbops_test`；gzip 校验通过。源、目标 SQL 均含 `acceptance` 表相同的 5 条记录 |
+| 实例身份 | 源库 UUID 为 `d75c9586-beba-11f1-8b95-5254006a3068`；新库 UUID 为 `b992b19b-bf14-11f1-88ba-52540076d516`，二者不同。新库 `server_id=1004` |
+| 重启与持久性 | 平台重启任务 #27 成功；任务 #28 在重启后再次备份，仍读到同一组 5 条记录。新服务已启用，原有 3319 服务和 Agent 保持运行 |
+
+任务 #23 在目标 Agent 下载软件包前失败：当时目标机隧道监听 18091，而平台生成的软件包地址使用 18089。统一 Agent 地址和远端监听端口为 18089 后，下载可用。任务 #24 完成传输和安装，却在初始化账户时因目标机缺少 `libncurses.so.5`、`libtinfo.so.5` 失败。核对官方 Ubuntu 软件包索引与 SHA256 后，安装 jammy-updates 的 `libncurses5`、`libtinfo5`，并用 `ldd` 确认 MySQL 客户端依赖已满足。失败实例的服务已停止、禁用；目录和 unit 改名留存，没有覆盖现场。随后任务 #25 在原端口重新执行成功。
+
+验收后，tx124 根分区约有 29 GiB 可用空间。`dbops-mysql13310.service`、`aim-mysql-3319.service` 和 `dbops-agent.service` 均为 active。测试失败现场位于 `/opt/dbops/mysql/13310.failed-task24-20261003`；排查结束前保留。
+
+## 未覆盖的双机复制
+
+tx124 到 tx50 公网 13307 的 TCP 连接超时。tx124 与 tx180 的 Tailscale 节点能互相 ping，但双向 TCP 22 连接超时；tx50 未接入该 tailnet。因此没有在 tx124 建立真实的跨主机 GTID 复制，也没有把任务 #25 的独立恢复实例当作副本。下一步需要受控的数据库网络路径，再用全新空白实例验证平台自动导出 GTID 基线、跨 Agent 导入、复制追平和故障恢复。当前跨主机逻辑备份传输、新主机恢复和重启后的数据持久性已经实测。
