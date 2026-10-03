@@ -1,16 +1,19 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import {useRoute} from 'vue-router'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {useRoute,useRouter} from 'vue-router'
 import { api, getData } from '../api'
 import {ElMessageBox} from 'element-plus'
 import {useAuthStore} from '../stores/auth'
 const auth=useAuthStore()
 
 const route=useRoute()
+const router=useRouter()
 const error=ref('')
 let timer:ReturnType<typeof setTimeout>
 let disposed=false
 const tasks = ref<any[]>([])
+const statusFilter=computed(()=>String(route.query.status||'').toLowerCase())
+const filteredTasks=computed(()=>tasks.value.filter(task=>!statusFilter.value||(statusFilter.value==='active'?['queued','running'].includes(String(task.status).toLowerCase()):String(task.status).toLowerCase()===statusFilter.value)))
 const selected = ref<any | null>(null)
 const drawer = ref(false)
 const steps = ref<any[]>([])
@@ -35,8 +38,9 @@ onUnmounted(()=>{disposed=true;clearTimeout(timer)})
   <div>
     <div class="page-title"><div><h2>任务中心</h2><p>Durable Task、固定 Step 与 Agent Event 审计</p></div><el-button @click="load">刷新</el-button></div>
     <el-alert v-if="error" :title="error" type="error" />
+    <div v-if="statusFilter" class="filter-row"><el-tag closable @close="router.replace({query:{...route.query,status:undefined}})">{{statusFilter==='active'?'排队与执行中':statusFilter}}</el-tag><span class="muted">共 {{filteredTasks.length}} 个任务</span></div>
     <el-card shadow="never">
-      <el-table :data="tasks" @row-click="open">
+      <el-table :data="filteredTasks" @row-click="open">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="task_type" label="任务类型" min-width="210" />
         <el-table-column prop="target_type" label="目标" width="110" />

@@ -37,18 +37,18 @@ onMounted(async () => {
     </div>
     <div class="page-title"><div><h2>运行总览</h2><p>面向 DBA 的资源与运维状态视图</p></div><div class="page-actions"><el-button @click="router.push('/tasks')">查看全部任务</el-button><el-button type="primary" @click="router.push('/operations?category=protection')">发起备份</el-button></div></div>
     <div class="metric-grid">
-      <div class="metric-card"><div class="metric-card-head"><span>数据库实例</span><div class="metric-icon"><el-icon><Coin/></el-icon></div></div><strong>{{ databases.length }}</strong><small>{{ onlineDatabases }} 个在线</small></div>
-      <div class="metric-card"><div class="metric-card-head"><span>纳管主机</span><div class="metric-icon"><el-icon><Monitor/></el-icon></div></div><strong>{{ hosts.length }}</strong><small>主机资源池</small></div>
-      <div class="metric-card success"><div class="metric-card-head"><span>在线 Agent</span><div class="metric-icon"><el-icon><Connection/></el-icon></div></div><strong>{{ onlineAgents }}/{{ agents.length }}</strong><small>心跳连接状态</small></div>
-      <div class="metric-card"><div class="metric-card-head"><span>运行中任务</span><div class="metric-icon"><el-icon><Tickets/></el-icon></div></div><strong>{{ runningTasks }}</strong><small>排队与执行中</small></div>
-      <div class="metric-card danger"><div class="metric-card-head"><span>活动告警</span><div class="metric-icon"><el-icon><Bell/></el-icon></div></div><strong>{{ firingAlerts }}</strong><small>需要 DBA 关注</small></div>
+      <div class="metric-card"><div class="metric-card-head"><span>数据库实例</span><div class="metric-icon"><el-icon><Coin/></el-icon></div></div><strong><RouterLink class="metric-value-link" to="/assets?tab=databases" aria-label="查看全部数据库实例">{{ databases.length }}</RouterLink></strong><small><RouterLink class="metric-sub-link" to="/assets?tab=databases&status=online">{{ onlineDatabases }} 个在线</RouterLink></small></div>
+      <div class="metric-card"><div class="metric-card-head"><span>纳管主机</span><div class="metric-icon"><el-icon><Monitor/></el-icon></div></div><strong><RouterLink class="metric-value-link" to="/assets?tab=hosts" aria-label="查看全部纳管主机">{{ hosts.length }}</RouterLink></strong><small>主机资源池</small></div>
+      <div class="metric-card success"><div class="metric-card-head"><span>在线 Agent</span><div class="metric-icon"><el-icon><Connection/></el-icon></div></div><strong><RouterLink class="metric-value-link" to="/assets?tab=agents&status=online" aria-label="查看在线 Agent">{{ onlineAgents }}/{{ agents.length }}</RouterLink></strong><small>心跳连接状态</small></div>
+      <div class="metric-card"><div class="metric-card-head"><span>运行中任务</span><div class="metric-icon"><el-icon><Tickets/></el-icon></div></div><strong><RouterLink class="metric-value-link" to="/tasks?status=active" aria-label="查看排队和执行中的任务">{{ runningTasks }}</RouterLink></strong><small>排队与执行中</small></div>
+      <div class="metric-card danger"><div class="metric-card-head"><span>活动告警</span><div class="metric-icon"><el-icon><Bell/></el-icon></div></div><strong><RouterLink class="metric-value-link" to="/alerts?status=FIRING" aria-label="查看活动告警">{{ firingAlerts }}</RouterLink></strong><small>需要 DBA 关注</small></div>
     </div>
 
     <div class="two-col">
       <el-card shadow="never" class="surface-card">
         <template #header><div><h3 class="section-title">最近任务</h3><p class="section-subtitle">数据库变更与保护任务的最新执行状态</p></div></template>
         <el-table :data="tasks.slice(0, 8)" size="small" @row-click="openTask">
-          <el-table-column prop="id" label="ID" width="65" />
+          <el-table-column label="ID" width="65"><template #default="{row}"><RouterLink class="task-id-link" :to="{path:'/tasks',query:{id:row.id}}" @click.stop>{{row.id}}</RouterLink></template></el-table-column>
           <el-table-column prop="task_type" label="任务类型" min-width="190" />
           <el-table-column prop="target_type" label="目标" width="100" />
           <el-table-column label="状态" width="105"><template #default="{row}"><el-tag :type="statusType(row.status)" effect="light" size="small">{{row.status}}</el-tag></template></el-table-column>
@@ -59,7 +59,7 @@ onMounted(async () => {
       <div>
         <el-card shadow="never" class="surface-card">
           <template #header><div><h3 class="section-title">资源分布</h3><p class="section-subtitle">按数据库引擎统计</p></div></template>
-          <div class="db-type-list"><div v-for="(count, type) in dbTypes" :key="type"><span>{{ type }}</span><el-tag effect="plain">{{ count }} 个实例</el-tag></div><el-empty v-if="!databases.length" description="暂无数据库资产" :image-size="62" /></div>
+          <div class="db-type-list"><div v-for="(count, type) in dbTypes" :key="type"><span>{{ type }}</span><RouterLink class="db-count-link" :to="{path:'/assets',query:{tab:'databases',engine:type}}" :aria-label="`查看 ${type} 的 ${count} 个实例`"><el-tag effect="plain">{{ count }} 个实例</el-tag></RouterLink></div><el-empty v-if="!databases.length" description="暂无数据库资产" :image-size="62" /></div>
         </el-card>
         <div class="quick-actions">
           <div class="quick-action" @click="router.push('/assets')"><strong>资源中心</strong><small>查看数据库与主机</small></div>

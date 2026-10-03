@@ -52,6 +52,14 @@ body { margin: 0; min-width: 1024px; background: #f5f7fa; }
 .metric-icon { width:34px; height:34px; border-radius:9px; display:grid; place-items:center; background:#edf9f7; color:#168979; }
 .metric-card span,.metric-card small { display:block; color:var(--muted); }
 .metric-card strong { display:block; font-size:29px; margin:14px 0 6px; letter-spacing:-1px; }
+.metric-value-link { color:inherit; text-decoration:underline; text-decoration-thickness:1px; text-underline-offset:5px; }
+.metric-sub-link { color:var(--brand-deep); text-decoration:underline; text-decoration-color:#a8d9d1; text-underline-offset:3px; }
+.metric-value-link:hover,.metric-sub-link:hover,.db-count-link:hover { text-decoration-color:currentColor; text-decoration-thickness:2px; }
+.metric-value-link:focus-visible,.metric-sub-link:focus-visible,.db-count-link:focus-visible { outline:2px solid var(--brand); outline-offset:3px; border-radius:3px; }
+.db-count-link { display:inline-flex; text-decoration:none; }
+.task-id-link { color:var(--brand-deep); text-decoration:none; }
+.task-id-link:hover { text-decoration:underline; text-underline-offset:3px; }
+.task-id-link:focus-visible { outline:2px solid var(--brand); outline-offset:3px; border-radius:3px; }
 .metric-card.danger .metric-icon { color:#d92d20; background:#fff1f0; }
 .metric-card.danger strong { color:#d92d20; }
 .metric-card.success .metric-icon { color:#079455; background:#ecfdf3; }

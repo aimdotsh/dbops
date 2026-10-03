@@ -5,7 +5,8 @@ import { ElMessage } from 'element-plus'
 import { api, getData } from '../api'
 
 const route=useRoute(),router=useRouter()
-const tab=ref(String(route.query.tab||'databases')),search=ref(String(route.query.search||'')),engine=ref('')
+const tab=ref(String(route.query.tab||'databases')),search=ref(String(route.query.search||'')),engine=ref(String(route.query.engine||''))
+const statusFilter=computed(()=>String(route.query.status||'').toLowerCase())
 const hosts=ref<any[]>([]),agents=ref<any[]>([]),databases=ref<any[]>([]),loading=ref(true)
 const onboardingOpen=ref(false),onboardingBusy=ref(false),onboardingStep=ref(0),precheck=ref<any>(null),fingerprintConfirmed=ref(false),serverReachable=ref(false)
 const onboarding=ref<any>({address:'',port:22,username:'root',auth_type:'password',password:'',private_key:'',private_key_passphrase:'',sudo_password:'',advertise_ip:'',agent_id:'',server_url:window.location.origin,ca_certificate:''})
@@ -15,14 +16,17 @@ const fingerprintCommand=computed(()=>{
  return kind?`sudo ssh-keygen -lf /etc/ssh/ssh_host_${kind}_key.pub -E sha256`:''
 })
 const onlineAgents=computed(()=>agents.value.filter(x=>x.status==='online').length)
-const onlineDBs=computed(()=>databases.value.filter(x=>['online','healthy','running'].includes(String(x.status).toLowerCase())).length)
+const isOnline=(status:string)=>['online','healthy','running'].includes(String(status).toLowerCase())
+const onlineDBs=computed(()=>databases.value.filter(x=>isOnline(x.status)).length)
 const engines=computed(()=>[...new Set(databases.value.map(x=>x.db_type))])
 const engineFilters=computed(()=>['',...engines.value])
-const filteredDatabases=computed(()=>databases.value.filter(x=>(!engine.value||x.db_type===engine.value)&&(!search.value||`${x.name} ${x.version} ${x.port}`.toLowerCase().includes(search.value.toLowerCase()))))
+const filteredDatabases=computed(()=>databases.value.filter(x=>(!engine.value||x.db_type===engine.value)&&(!statusFilter.value||(statusFilter.value==='online'?isOnline(x.status):String(x.status).toLowerCase()===statusFilter.value))&&(!search.value||`${x.name} ${x.version} ${x.port}`.toLowerCase().includes(search.value.toLowerCase()))))
 const filteredHosts=computed(()=>hosts.value.filter(x=>!search.value||`${x.hostname} ${x.ip_address}`.toLowerCase().includes(search.value.toLowerCase())))
-const filteredAgents=computed(()=>agents.value.filter(x=>!search.value||`${x.agent_uuid} ${x.architecture}`.toLowerCase().includes(search.value.toLowerCase())))
+const filteredAgents=computed(()=>agents.value.filter(x=>(!statusFilter.value||String(x.status).toLowerCase()===statusFilter.value)&&(!search.value||`${x.agent_uuid} ${x.architecture}`.toLowerCase().includes(search.value.toLowerCase()))))
 const tagType=(status:string)=>(['online','healthy','running'].includes(String(status).toLowerCase())?'success':String(status).toLowerCase()==='offline'?'danger':'info') as any
-function changeTab(){router.replace({query:{...route.query,tab:tab.value}});search.value=''}
+function changeTab(){search.value='';engine.value='';router.replace({query:{tab:tab.value}})}
+function setEngine(value:string){engine.value=value;router.replace({query:{...route.query,engine:value||undefined}})}
+function clearStatusFilter(){router.replace({query:{...route.query,status:undefined}})}
 async function loadAssets(){[hosts.value,agents.value,databases.value]=await Promise.all([getData<any[]>('/hosts'),getData<any[]>('/agents'),getData<any[]>('/databases')])}
 function openOnboarding(){onboardingOpen.value=true;onboardingStep.value=0;precheck.value=null;fingerprintConfirmed.value=false;serverReachable.value=false}
 function resetOnboarding(){onboarding.value.password='';onboarding.value.private_key='';onboarding.value.private_key_passphrase='';onboarding.value.sudo_password='';precheck.value=null;fingerprintConfirmed.value=false;serverReachable.value=false;onboardingStep.value=0}
@@ -44,6 +48,7 @@ async function submitOnboarding(){
  finally{onboardingBusy.value=false;onboarding.value.password='';onboarding.value.private_key='';onboarding.value.private_key_passphrase='';onboarding.value.sudo_password=''}
 }
 watch(()=>route.query.tab,v=>{if(v)tab.value=String(v)})
+watch(()=>route.query.engine,v=>{engine.value=String(v||'')})
 watch(()=>[onboarding.value.server_url,onboarding.value.ca_certificate,onboarding.value.advertise_ip],()=>{serverReachable.value=false})
 onMounted(async()=>{try{await loadAssets()}finally{loading.value=false}})
 </script>
@@ -60,8 +65,8 @@ onMounted(async()=>{try{await loadAssets()}finally{loading.value=false}})
   <el-card shadow="never" class="surface-card" v-loading="loading">
    <el-tabs v-model="tab" @tab-change="changeTab">
     <el-tab-pane label="数据库实例" name="databases">
-     <div class="engine-switch"><button v-for="item in engineFilters" :key="item||'all'" :class="{active:engine===item}" @click="engine=item">{{item||'全部引擎'}}</button></div>
-     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索实例名称、版本或端口" style="width:300px"/><el-select v-model="engine" clearable placeholder="全部引擎" style="width:160px"><el-option v-for="item in engines" :key="item" :label="item" :value="item"/></el-select><span class="muted">共 {{filteredDatabases.length}} 个实例</span></div>
+     <div class="engine-switch"><button v-for="item in engineFilters" :key="item||'all'" :class="{active:engine===item}" @click="setEngine(item)">{{item||'全部引擎'}}</button></div>
+     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索实例名称、版本或端口" style="width:300px"/><el-select v-model="engine" clearable placeholder="全部引擎" style="width:160px" @change="setEngine"><el-option v-for="item in engines" :key="item" :label="item" :value="item"/></el-select><el-tag v-if="statusFilter" closable @close="clearStatusFilter">{{statusFilter==='online'?'在线数据库':statusFilter}}</el-tag><span class="muted">共 {{filteredDatabases.length}} 个实例</span></div>
      <el-table :data="filteredDatabases">
       <el-table-column prop="name" label="实例名称" min-width="190"><template #default="{row}"><el-button link type="primary" class="instance-link" @click="router.push(`/databases/${row.id}`)">{{row.name}}</el-button><div class="muted">ID {{row.id}}</div></template></el-table-column>
       <el-table-column prop="db_type" label="引擎" width="115"/><el-table-column prop="version" label="版本" min-width="140"/><el-table-column prop="role" label="角色" width="110"/><el-table-column prop="port" label="端口" width="90"/>
@@ -75,7 +80,7 @@ onMounted(async()=>{try{await loadAssets()}finally{loading.value=false}})
      <el-table :data="filteredHosts"><el-table-column prop="hostname" label="主机名" min-width="190"><template #default="{row}"><strong>{{row.hostname}}</strong><div class="muted">Host #{{row.id}}</div></template></el-table-column><el-table-column prop="ip_address" label="IP 地址" min-width="170"/><el-table-column label="状态" width="120"><template #default="{row}"><el-tag :type="tagType(row.status)">{{row.status}}</el-tag></template></el-table-column><el-table-column label="关联资源"><template #default="{row}">{{databases.filter(x=>x.host_id===row.id).length}} 个数据库</template></el-table-column></el-table><el-empty v-if="!filteredHosts.length" description="Agent 注册后会自动创建主机"/>
     </el-tab-pane>
     <el-tab-pane label="Agent" name="agents">
-     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索 Agent UUID 或架构" style="width:300px"/><span class="muted">共 {{filteredAgents.length}} 个 Agent</span></div>
+     <div class="filter-row"><el-input v-model="search" clearable placeholder="搜索 Agent UUID 或架构" style="width:300px"/><el-tag v-if="statusFilter" closable @close="clearStatusFilter">{{statusFilter==='online'?'在线 Agent':statusFilter}}</el-tag><span class="muted">共 {{filteredAgents.length}} 个 Agent</span></div>
      <el-table :data="filteredAgents"><el-table-column prop="agent_uuid" label="Agent 标识" min-width="260"><template #default="{row}"><strong>{{row.agent_uuid}}</strong><div class="muted">Agent #{{row.id}}</div></template></el-table-column><el-table-column prop="version" label="版本" width="120"/><el-table-column prop="architecture" label="架构" width="120"/><el-table-column label="连接状态" width="130"><template #default="{row}"><span class="status-pill"><i class="status-dot" :class="row.status"/>{{row.status}}</span></template></el-table-column><el-table-column prop="last_seen_at" label="最近心跳" min-width="180"/></el-table><el-empty v-if="!filteredAgents.length" description="部署 Agent 后会在此显示连接状态"/>
     </el-tab-pane>
    </el-tabs>

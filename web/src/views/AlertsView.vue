@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { api, getData } from '../api'
 
 import {useAuthStore} from '../stores/auth'
 const auth=useAuthStore(),error=ref('')
+const route=useRoute(),router=useRouter()
 const canOperate=computed(()=>auth.user?.roles?.some(r=>['SuperAdmin','DBA','Operator'].includes(r)))
 const alerts = ref<any[]>([])
+const statusFilter=computed(()=>String(route.query.status||'').toUpperCase())
+const filteredAlerts=computed(()=>alerts.value.filter(alert=>!statusFilter.value||String(alert.status).toUpperCase()===statusFilter.value))
 async function load() { alerts.value = await getData<any[]>('/alerts') }
 async function ack(id:number){try{await api.post(`/alerts/${id}/ack`);await load()}catch(e:any){error.value=e.response?.data?.message||e.message}}
 async function silence(id:number){try{await api.post(`/alerts/${id}/silence`,{seconds:3600});await load()}catch(e:any){error.value=e.response?.data?.message||e.message}}
@@ -16,8 +20,9 @@ onMounted(load)
   <div>
     <div class="page-title"><div><h2>告警中心</h2><p>Firing / Acknowledged / Resolved 生命周期</p></div><el-button @click="load">刷新</el-button></div>
     <el-alert v-if="error" :title="error" type="error"/>
+    <div v-if="statusFilter" class="filter-row"><el-tag closable @close="router.replace({query:{...route.query,status:undefined}})">{{statusFilter==='FIRING'?'活动告警':statusFilter}}</el-tag><span class="muted">共 {{filteredAlerts.length}} 条告警</span></div>
     <el-card shadow="never">
-      <el-table :data="alerts">
+      <el-table :data="filteredAlerts">
         <el-table-column prop="severity" label="级别" width="90" />
         <el-table-column prop="fingerprint" label="规则" min-width="180" />
         <el-table-column prop="resource_type" label="资源" width="110" />
