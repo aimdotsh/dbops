@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Bell, Connection, DataAnalysis, DocumentChecked, Files, Monitor, Operation, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { getData } from '../api'
+import OracleTablespacePanel from './OracleTablespacePanel.vue'
 
 const route=useRoute(),router=useRouter(),loading=ref(true),error=ref('')
 const databases=ref<any[]>([]),hosts=ref<any[]>([]),agents=ref<any[]>([]),tasks=ref<any[]>([]),alerts=ref<any[]>([]),latestMetric=ref<any>()
@@ -18,19 +19,20 @@ const healthy=computed(()=>['online','healthy','running','success'].includes(Str
 const statusType=computed(()=>(healthy.value?'success':'warning') as any)
 const isOracle=computed(()=>String(database.value?.db_type).toLowerCase()==='oracle')
 const instanceMode=computed(()=>route.query.view==='instance')
-const subnav=computed(()=>isOracle.value?['基本信息','实例详情','用户管理','参数管理','告警日志','REDO 管理','对象管理']:['基本信息','实例详情','用户管理','日志管理','参数管理'])
+const tablespaceMode=computed(()=>isOracle.value&&route.query.view==='tablespaces')
+const subnav=computed(()=>isOracle.value?['基本信息','实例详情','表空间管理']:['基本信息','实例详情'])
 const metricItems=computed(()=>Object.entries(latestMetric.value?.payload||{}).filter(([,value])=>typeof value==='number').slice(0,4))
 const tabs=[
  {label:'基础运维',icon:Operation,action:()=>undefined},
  {label:'性能',icon:DataAnalysis,action:()=>router.push(`/metrics?resource=database&id=${id.value}`)},
  {label:'告警',icon:Bell,action:()=>router.push('/alerts')},
  {label:'巡检',icon:DocumentChecked,action:()=>router.push('/records?group=governance')},
- {label:'容量',icon:TrendCharts,action:()=>router.push(`/operations?category=lifecycle&instance_id=${id.value}`)},
+ {label:'容量',icon:TrendCharts,action:()=>isOracle.value?selectSubnav('表空间管理'):router.push(`/operations?category=lifecycle&instance_id=${id.value}`)},
  {label:'高可用',icon:Connection,action:()=>router.push(`/operations?category=ha&instance_id=${id.value}`)},
  {label:'备份恢复',icon:Files,action:()=>router.push(`/operations?category=protection&instance_id=${id.value}`)},
 ]
 function roleName(role:string){return ({primary:'主库',master:'主库',replica:'从库',slave:'从库'} as Record<string,string>)[String(role).toLowerCase()]||role||'单实例'}
-function selectSubnav(item:string){if(item==='实例详情')router.replace({query:{...route.query,view:'instance'}});else if(item==='基本信息')router.replace({query:{...route.query,view:undefined}})}
+function selectSubnav(item:string){router.replace({query:{...route.query,view:item==='实例详情'?'instance':item==='表空间管理'?'tablespaces':undefined}})}
 async function load(){loading.value=true;error.value='';try{[databases.value,hosts.value,agents.value,tasks.value,alerts.value]=await Promise.all([getData<any[]>('/databases'),getData<any[]>('/hosts'),getData<any[]>('/agents'),getData<any[]>('/tasks'),getData<any[]>('/alerts')]);if(!database.value)error.value='未找到该数据库实例';else latestMetric.value=await getData(`/metrics/latest?resource_type=database&resource_id=${id.value}`).catch(()=>undefined)}catch(e:any){error.value=e.response?.data?.message||e.message}finally{loading.value=false}}
 onMounted(load)
 </script>
@@ -43,11 +45,12 @@ onMounted(load)
     <div class="service-identity"><span class="engine-badge">{{String(database.db_type).slice(0,2).toUpperCase()}}</span><strong>{{database.db_type}} / {{database.name}}</strong><small>{{endpoint}}</small></div>
     <div class="service-tabs"><button v-for="(item,index) in tabs" :key="item.label" :class="{active:index===0}" @click="item.action"><el-icon><component :is="item.icon"/></el-icon>{{item.label}}</button></div>
    </div>
-   <div class="detail-subnav"><span v-for="item in subnav" :key="item" :class="{active:(item==='基本信息'&&!instanceMode)||(item==='实例详情'&&instanceMode)}" @click="selectSubnav(item)">{{item}}</span></div>
+   <div class="detail-subnav"><span v-for="item in subnav" :key="item" :class="{active:(item==='基本信息'&&!instanceMode&&!tablespaceMode)||(item==='实例详情'&&instanceMode)||(item==='表空间管理'&&tablespaceMode)}" @click="selectSubnav(item)">{{item}}</span></div>
    <el-alert v-if="!healthy" title="当前实例状态异常，执行变更前请先核查 Agent 连接、数据库进程和最近任务。" type="warning" show-icon :closable="false" class="detail-alert"/>
-   <template v-if="!instanceMode">
+   <OracleTablespacePanel v-if="tablespaceMode" :instance-id="id"/>
+   <template v-else-if="!instanceMode">
    <section class="service-panel">
-    <div class="service-panel-head"><div><span class="eyebrow">数据库服务</span><h2>{{database.name}}</h2><p>{{endpoint}} · {{database.version||'版本待发现'}}</p></div><div class="page-actions"><el-button :icon="Refresh" @click="load">同步</el-button><el-button @click="router.push('/records?group=governance')">巡检记录</el-button><el-button @click="router.push(`/operations?category=lifecycle&instance_id=${id}`)">实例操作</el-button><el-button type="primary" @click="router.push(`/operations?category=protection&instance_id=${id}`)">备份恢复</el-button></div></div>
+    <div class="service-panel-head"><div><span class="eyebrow">数据库服务</span><h2>{{database.name}}</h2><p>{{endpoint}} · {{database.version||'版本待发现'}}</p></div><div class="page-actions"><el-button :icon="Refresh" @click="load">同步</el-button><el-button v-if="isOracle" @click="selectSubnav('表空间管理')">表空间管理</el-button><el-button @click="router.push('/records?group=governance')">巡检记录</el-button><el-button @click="router.push(`/operations?category=lifecycle&instance_id=${id}`)">实例操作</el-button><el-button type="primary" @click="router.push(`/operations?category=protection&instance_id=${id}`)">备份恢复</el-button></div></div>
     <div class="detail-section-title">基本信息</div>
     <div class="property-grid">
      <div><span>服务显示名称</span><strong>{{database.name}}</strong></div><div><span>来源</span><strong>{{database.managed_mode==='installed'?'平台部署':'纳管数据库'}}</strong></div><div><span>运行状态</span><el-tag :type="statusType" effect="light">{{database.status}}</el-tag></div>

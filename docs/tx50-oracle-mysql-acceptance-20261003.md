@@ -17,6 +17,7 @@ MySQL 使用[官方 8.0.46 glibc 2.17 精简包](https://dev.mysql.com/downloads
 | Oracle 状态和 Data Guard 查询 | 返回 `PRIMARY`、`READ WRITE`；未配置备库，延迟和进程为空 |
 | Oracle 表空间和数据文件查询 | `DBOPS_TEST` 初始数据文件为 32 MiB；TEMP 显示 32 MiB 总量和 0 MiB 使用量 |
 | 新增和扩容数据文件 | 任务 #3 新增 32 MiB 文件；任务 #4 将该文件扩到 64 MiB，平台回读与数据库元数据一致 |
+| Oracle 实例管理页扩容复验 | 2026-10-03 再次启动 `dbops-oracle.service`，通过平台任务 #15 在 `DBOPS_TEST` 的原目录 `/opt/dbops/oradata/DBOPS` 新增 16 MiB 的 `dbops_ui_acceptance_20261003.dbf`；任务 #16 将其扩到 32 MiB。两项任务均成功，数据文件查询回读为 32 MiB。服务保持禁用开机自启。|
 | RMAN 全量备份 | 任务 #6 成功，2 个备份片共 433,602,048 字节，平台保存文件摘要和清单摘要 |
 | RMAN 归档备份 | 任务 #7 成功。Agent 自动创建新目录并设置为 Oracle 系统用户所有，备份片为 17,920 字节 |
 | MySQL 逻辑备份 | 任务 #10 使用 mysqldump 备份 `dbops_test`；gzip 校验通过，SHA256 与平台记录一致，SQL 文件包含 3 条测试记录 |

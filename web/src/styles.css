@@ -140,6 +140,12 @@ body { margin: 0; min-width: 1024px; background: #f5f7fa; }
 .detail-subnav .active { color:var(--brand-deep); border-bottom:2px solid var(--brand); font-weight:650; }
 .detail-alert { margin-bottom:14px; }
 .service-panel { background:#fff; border:1px solid var(--line); border-radius:4px; padding:20px 22px; margin-bottom:16px; box-shadow:0 1px 3px rgba(16,24,40,.025); }
+.oracle-capacity-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:18px 0; }
+.oracle-capacity-summary>div { border:1px solid var(--line); border-radius:8px; padding:13px 16px; background:#fafcfd; }
+.oracle-capacity-summary span,.oracle-capacity-summary strong { display:block; }
+.oracle-capacity-summary span { color:var(--muted); font-size:12px; }
+.oracle-capacity-summary strong { margin-top:7px; font-size:18px; }
+.oracle-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .service-panel-head { display:flex; align-items:center; justify-content:space-between; gap:20px; padding-bottom:16px; border-bottom:1px solid var(--line); }
 .service-panel-head h2 { margin:3px 0 3px; font-size:20px; }
 .service-panel-head p { margin:0; color:var(--muted); font-size:12px; }

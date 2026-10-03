@@ -72,7 +72,7 @@ onMounted(async()=>{try{await loadAssets()}finally{loading.value=false}})
       <el-table-column prop="db_type" label="引擎" width="115"/><el-table-column prop="version" label="版本" min-width="140"/><el-table-column prop="role" label="角色" width="110"/><el-table-column prop="port" label="端口" width="90"/>
       <el-table-column label="运行状态" width="115"><template #default="{row}"><el-tag :type="tagType(row.status)" effect="light">{{row.status}}</el-tag></template></el-table-column>
       <el-table-column prop="managed_mode" label="接入方式" width="120"/>
-      <el-table-column label="操作" width="190" fixed="right"><template #default="{row}"><el-button link type="primary" @click="router.push(`/databases/${row.id}`)">详情</el-button><el-button link @click="router.push(`/operations?category=lifecycle&instance_id=${row.id}`)">运维</el-button><el-button link @click="router.push(`/metrics?resource=database&id=${row.id}`)">性能</el-button></template></el-table-column>
+      <el-table-column label="操作" width="210" fixed="right"><template #default="{row}"><el-button link type="primary" @click="router.push(`/databases/${row.id}${row.db_type==='oracle'?'?view=tablespaces':''}`)">管理</el-button><el-button link @click="router.push(`/databases/${row.id}`)">详情</el-button><el-button link @click="router.push(`/metrics?resource=database&id=${row.id}`)">性能</el-button></template></el-table-column>
      </el-table><el-empty v-if="!filteredDatabases.length" description="暂无数据库实例，点击右上角开始接入"/>
     </el-tab-pane>
     <el-tab-pane label="主机" name="hosts">
