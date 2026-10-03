@@ -28,4 +28,4 @@ RMAN 任务 #5 首次失败，因为 Agent 以 root 创建输出目录，Oracle 
 
 ## 尚未覆盖
 
-这次验收没有配置 Data Guard 备库，也没有执行 RMAN 恢复。同机 MySQL 主从仅验证功能，不具备主机故障隔离能力；双机恢复和故障场景仍以既有 [双机验收记录](real-environment-acceptance-20260920.md) 为准。平台当前不会在创建复制时自动打开从库只读，本次通过 MySQL `SET PERSIST super_read_only=ON` 补齐；资产列表中的实例 `role` 与 Oracle 的静态 `status` 尚未随实际拓扑和停机状态更新，应以复制关系和实时状态查询为准。此演示平台的反向隧道是临时连接，不能作为长期部署入口。长期纳管需要目标机可持续访问的 HTTPS 平台地址。
+这次验收没有配置 Data Guard 备库，也没有执行 RMAN 恢复。同机 MySQL 主从仅验证功能，不具备主机故障隔离能力；双机恢复和故障场景仍以既有 [双机验收记录](real-environment-acceptance-20260920.md) 为准。任务 #14 运行时，旧版 Agent 尚未自动设置从库只读，本次手工执行了 `SET PERSIST super_read_only=ON`。代码和演示环境现已更新：后续创建复制会自动设置从库只读；刷新复制关系 #1 后，资产角色显示 primary/replica，定期监控将已停用的 Oracle 标为 offline。演示平台通过临时 [SSH 反向隧道](demo-reverse-ssh-tunnel.md) 接入，长期纳管需要目标机可持续访问的 HTTPS 平台地址。

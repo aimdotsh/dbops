@@ -41,14 +41,16 @@ func (m *Monitor) Tick(ctx context.Context) error {
 			return ctx.Err()
 		}
 		wg.Add(1)
-		go func(id int64, collect Collector) {
+		go func(id int64, currentStatus string, collect Collector) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			work, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			value, err := collect(work, id)
+			desiredStatus := "online"
 			payload := map[string]any{"up": 1}
 			if err != nil {
+				desiredStatus = "offline"
 				payload = map[string]any{"up": 0}
 			} else {
 				raw, e := json.Marshal(value)
@@ -60,7 +62,12 @@ func (m *Monitor) Tick(ctx context.Context) error {
 			if err = m.Store.Put(ctx, "database", id, time.Now().UTC(), payload); err != nil {
 				errs <- err
 			}
-		}(inst.ID, collect)
+			if currentStatus != desiredStatus {
+				if err := m.Databases.UpdateStatus(ctx, id, desiredStatus); err != nil {
+					errs <- err
+				}
+			}
+		}(inst.ID, inst.Status, collect)
 	}
 	wg.Wait()
 	close(errs)

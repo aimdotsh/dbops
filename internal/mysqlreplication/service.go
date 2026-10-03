@@ -221,7 +221,17 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, _ = step(6, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) { return rec, nil })
+		if _, err := step(6, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) {
+			if err := s.dbs.UpdateRole(ctx, rec.PrimaryInstanceID, "primary"); err != nil {
+				return nil, err
+			}
+			if err := s.dbs.UpdateRole(ctx, rec.ReplicaInstanceID, "replica"); err != nil {
+				return nil, err
+			}
+			return rec, nil
+		}); err != nil {
+			return nil, err
+		}
 		_, _ = step(7, "ENABLE_REPLICATION_ALERTS", "Enable replication alerts", 95, func() (any, error) {
 			return map[string]any{"enabled": true, "defaults": []string{"thread_down", "lag"}}, nil
 		})
@@ -253,6 +263,12 @@ func (s *Service) Refresh(ctx context.Context, id int64) (domain.MySQLReplicatio
 	rec.LastSQLError = stringValue(status["last_sql_error"])
 	rec.Status = stringValue(status["status"])
 	if err := s.replications.UpdateStatus(ctx, id, rec); err != nil {
+		return rec, err
+	}
+	if err := s.dbs.UpdateRole(ctx, rec.PrimaryInstanceID, "primary"); err != nil {
+		return rec, err
+	}
+	if err := s.dbs.UpdateRole(ctx, rec.ReplicaInstanceID, "replica"); err != nil {
 		return rec, err
 	}
 	return s.replications.Get(ctx, id)

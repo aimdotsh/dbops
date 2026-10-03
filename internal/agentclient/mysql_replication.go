@@ -76,7 +76,7 @@ func mysqlReplicationCreate(ctx context.Context, params map[string]any) (map[str
 			return nil, errors.New("invalid source host or port")
 		}
 		sqlText := fmt.Sprintf(
-			"STOP REPLICA; RESET REPLICA ALL; CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_PORT=%d, SOURCE_USER='%s', SOURCE_PASSWORD='%s', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA;",
+			"STOP REPLICA; RESET REPLICA ALL; CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_PORT=%d, SOURCE_USER='%s', SOURCE_PASSWORD='%s', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA; SET PERSIST super_read_only=ON;",
 			sourceHost, sourcePort, replUser, replPassword,
 		)
 		if _, err := runMySQLQuery(ctx, baseDir, runDir, rootPassword, sqlText, true); err != nil {

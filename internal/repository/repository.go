@@ -42,6 +42,7 @@ type DatabaseRepository interface {
 	CreateInstalled(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
 	CreateImported(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
 	UpdateStatus(context.Context, int64, string) error
+	UpdateRole(context.Context, int64, string) error
 }
 
 type SoftwarePackageRepository interface {
