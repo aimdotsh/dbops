@@ -219,9 +219,12 @@ func packBackup(ctx context.Context, source, archive string) error {
 		if err != nil {
 			return err
 		}
-		defer in.Close()
-		_, err = io.Copy(tw, in)
-		return err
+		_, copyErr := io.Copy(tw, in)
+		closeErr := in.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
 	})
 	te := tw.Close()
 	ge := gz.Close()

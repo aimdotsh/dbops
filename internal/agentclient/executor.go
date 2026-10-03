@@ -295,6 +295,11 @@ func intParam(params map[string]any, key string) (int, error) {
 		return int(n), nil
 	case int:
 		return n, nil
+	case int64:
+		if int64(int(n)) != n {
+			return 0, fmt.Errorf("%s is out of range", key)
+		}
+		return int(n), nil
 	case string:
 		return strconv.Atoi(n)
 	default:
