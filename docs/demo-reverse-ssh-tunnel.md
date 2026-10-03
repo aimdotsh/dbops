@@ -40,16 +40,18 @@ ssh tx50 'systemctl is-active dbops-agent.service'
 
 ## tx180 测试主机
 
-`tx180`（OpenCloudOS 9.4，x86_64）已在 2026-10-03 通过在线向导纳管，平台主机和 Agent 均为 #74。Agent 服务 `dbops-agent.service` 已启用，一次性 bootstrap token 已删除。它使用与 `tx50` 不同的远端回环端口：
+`tx180`（OpenCloudOS 9.4，x86_64）已在 2026-10-03 通过在线向导纳管，平台主机和 Agent 均为 #74。Agent 服务 `dbops-agent.service` 已启用，一次性 bootstrap token 已删除。为使软件包下载地址与 Agent 地址一致，tx180 现在使用远端回环端口 18089：
 
 ```sh
 ssh -o BatchMode=yes \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 \
-  -N -R 127.0.0.1:18090:127.0.0.1:18089 tx180
+  -N -R 127.0.0.1:18089:127.0.0.1:18089 tx180
 ```
 
-用 `ssh tx180 'curl -fsS http://127.0.0.1:18090/api/v1/health'` 核对隧道，再在资源中心确认 Agent 在线。断线后重新运行上述命令，Agent 会使用持久凭据重连。tx180 原有 Docker 应用未改动。用户清理空间后，2026-10-03 复查根分区剩余约 8.7 GiB（使用率 86%），可用于后续测试；安装前仍需核对内存、swap 和目标实例所需空间。
+用 `ssh tx180 'curl -fsS http://127.0.0.1:18089/api/v1/health'` 核对隧道，再在资源中心确认 Agent 在线。断线后重新运行上述命令，Agent 会使用持久凭据重连。旧的 Agent 配置已保存到 `/etc/dbops-agent/agent.yaml.pre-18089`。tx50、tx124 和 tx180 是不同主机，可分别监听各自的远端 18089。
+
+tx180 原有 Docker 应用未改动。用户清理空间后，2026-10-03 复查根分区剩余约 8.7 GiB（使用率 86%）。为测试 MySQL 安装，已从系统 AppStream 仓库安装 `ncurses-compat-libs`。安装任务 #35 因旧隧道端口与软件包地址不一致，在下载前失败。修正端口后的任务 #36 下载软件包过慢，已在初始化数据库前中断，保留约 13 MiB 的失败任务文件；tx180 没有新 MySQL 实例，Agent 已恢复在线。继续测试前需复查内存、swap、磁盘空间和软件下载路径。
 
 ## tx124 测试主机
 
