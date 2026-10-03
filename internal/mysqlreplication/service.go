@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aimdotsh/dbops/internal/actionpolicy"
 	"github.com/aimdotsh/dbops/internal/agentproto"
@@ -31,19 +33,21 @@ type Service struct {
 }
 
 type CreateRequest struct {
-	PrimaryInstanceID int64 `json:"primary_instance_id"`
-	ReplicaInstanceID int64 `json:"replica_instance_id"`
-	BaselineReady     bool  `json:"baseline_ready"`
-	AutoBaseline      bool  `json:"auto_baseline"`
-	Confirmed         bool  `json:"confirmed"`
+	PrimaryInstanceID int64  `json:"primary_instance_id"`
+	ReplicaInstanceID int64  `json:"replica_instance_id"`
+	SourceHost        string `json:"source_host,omitempty"`
+	BaselineReady     bool   `json:"baseline_ready"`
+	AutoBaseline      bool   `json:"auto_baseline"`
+	Confirmed         bool   `json:"confirmed"`
 }
 
 type createParams struct {
-	PrimaryInstanceID int64 `json:"primary_instance_id"`
-	ReplicaInstanceID int64 `json:"replica_instance_id"`
-	BaselineReady     bool  `json:"baseline_ready"`
-	AutoBaseline      bool  `json:"auto_baseline"`
-	Confirmed         bool  `json:"confirmed"`
+	PrimaryInstanceID int64  `json:"primary_instance_id"`
+	ReplicaInstanceID int64  `json:"replica_instance_id"`
+	SourceHost        string `json:"source_host,omitempty"`
+	BaselineReady     bool   `json:"baseline_ready"`
+	AutoBaseline      bool   `json:"auto_baseline"`
+	Confirmed         bool   `json:"confirmed"`
 }
 
 type runtime struct {
@@ -85,6 +89,12 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	if !req.Confirmed {
 		return domain.Task{}, errors.New("GTID replication creation is R3 and requires confirmed=true")
 	}
+	if req.SourceHost != "" {
+		addr, err := netip.ParseAddr(req.SourceHost)
+		if err != nil || !addr.Is4() || !addr.IsGlobalUnicast() {
+			return domain.Task{}, errors.New("source_host must be a non-loopback IPv4 address")
+		}
+	}
 	primary, err := s.dbs.Get(ctx, req.PrimaryInstanceID)
 	if err != nil {
 		return domain.Task{}, err
@@ -99,6 +109,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	params, _ := json.Marshal(createParams{
 		PrimaryInstanceID: req.PrimaryInstanceID,
 		ReplicaInstanceID: req.ReplicaInstanceID,
+		SourceHost:        req.SourceHost,
 		BaselineReady:     req.BaselineReady,
 		AutoBaseline:      req.AutoBaseline,
 		Confirmed:         true,
@@ -119,6 +130,12 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 		if !p.Confirmed || p.BaselineReady == p.AutoBaseline {
 			return nil, errors.New("replication safety confirmation is missing")
+		}
+		if p.SourceHost != "" {
+			addr, err := netip.ParseAddr(p.SourceHost)
+			if err != nil || !addr.Is4() || !addr.IsGlobalUnicast() {
+				return nil, errors.New("source_host must be a non-loopback IPv4 address")
+			}
 		}
 
 		primary, err := s.loadRuntime(ctx, p.PrimaryInstanceID)
@@ -213,10 +230,14 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
+		sourceHost := primary.Host.IPAddress
+		if p.SourceHost != "" {
+			sourceHost = p.SourceHost
+		}
 		if _, err := step(4+stepOffset, "CONFIGURE_REPLICA", "Configure replica", 60, func() (any, error) {
 			return s.dispatchCreate(ctx, t.ID, replica, map[string]any{
 				"mode": "replica_configure", "replication_user": replUser, "replication_password": replPassword,
-				"source_host": primary.Host.IPAddress, "source_port": primary.Instance.Port,
+				"source_host": sourceHost, "source_port": primary.Instance.Port,
 			})
 		}); err != nil {
 			return nil, err
@@ -224,7 +245,9 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 
 		var status map[string]any
 		if out, err := step(5+stepOffset, "VERIFY_REPLICATION", "Verify replication", 75, func() (any, error) {
-			return s.dispatchStatus(ctx, t.ID, replica)
+			return waitForHealthyReplication(ctx, 120*time.Second, 2*time.Second, func() (map[string]any, error) {
+				return s.dispatchStatus(ctx, t.ID, replica)
+			})
 		}); err != nil {
 			return nil, err
 		} else {
@@ -370,6 +393,27 @@ func (s *Service) dispatchStatus(ctx context.Context, _ int64, rt runtime) (map[
 	}
 	v, _ := resp.Result.(map[string]any)
 	return v, nil
+}
+
+func waitForHealthyReplication(ctx context.Context, timeout, interval time.Duration, read func() (map[string]any, error)) (map[string]any, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		status, err := read()
+		if err != nil {
+			return status, err
+		}
+		if status["status"] == "healthy" {
+			return status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return status, ctx.Err()
+		case <-deadline.C:
+			return status, fmt.Errorf("replication did not become healthy within %s: %v", timeout, status)
+		case <-time.After(interval):
+		}
+	}
 }
 
 func boolValue(v any) bool     { x, _ := v.(bool); return x }

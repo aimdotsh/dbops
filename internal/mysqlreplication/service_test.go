@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aimdotsh/dbops/internal/agentproto"
 	"github.com/aimdotsh/dbops/internal/domain"
@@ -44,6 +45,33 @@ func TestCreateRequiresOneBaselineMode(t *testing.T) {
 		if err == nil {
 			t.Errorf("prepared=%v auto=%v: expected rejection", tc.prepared, tc.auto)
 		}
+	}
+}
+
+func TestCreateRejectsInvalidSourceHostBeforeTaskCreation(t *testing.T) {
+	service := &Service{}
+	for _, host := range []string{"localhost", "127.0.0.1", "0.0.0.0", "224.0.0.1", "fe80::1", "2001:db8::1"} {
+		_, err := service.CreateTask(context.Background(), CreateRequest{
+			PrimaryInstanceID: 1, ReplicaInstanceID: 2, SourceHost: host,
+			AutoBaseline: true, Confirmed: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "source_host") {
+			t.Errorf("source_host %q: expected validation error, got %v", host, err)
+		}
+	}
+}
+
+func TestWaitForHealthyReplicationAllowsConnectionStartup(t *testing.T) {
+	reads := 0
+	status, err := waitForHealthyReplication(context.Background(), time.Second, time.Millisecond, func() (map[string]any, error) {
+		reads++
+		if reads == 1 {
+			return map[string]any{"status": "degraded", "io_thread_status": "Connecting"}, nil
+		}
+		return map[string]any{"status": "healthy", "io_thread_status": "Yes"}, nil
+	})
+	if err != nil || status["status"] != "healthy" || reads != 2 {
+		t.Fatalf("status=%v err=%v reads=%d", status, err, reads)
 	}
 }
 
