@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/aimdotsh/dbops/internal/actionpolicy"
 	"github.com/aimdotsh/dbops/internal/agentproto"
@@ -32,6 +34,7 @@ type CreateRequest struct {
 	PrimaryInstanceID int64 `json:"primary_instance_id"`
 	ReplicaInstanceID int64 `json:"replica_instance_id"`
 	BaselineReady     bool  `json:"baseline_ready"`
+	AutoBaseline      bool  `json:"auto_baseline"`
 	Confirmed         bool  `json:"confirmed"`
 }
 
@@ -39,6 +42,7 @@ type createParams struct {
 	PrimaryInstanceID int64 `json:"primary_instance_id"`
 	ReplicaInstanceID int64 `json:"replica_instance_id"`
 	BaselineReady     bool  `json:"baseline_ready"`
+	AutoBaseline      bool  `json:"auto_baseline"`
 	Confirmed         bool  `json:"confirmed"`
 }
 
@@ -75,8 +79,8 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	if req.PrimaryInstanceID <= 0 || req.ReplicaInstanceID <= 0 || req.PrimaryInstanceID == req.ReplicaInstanceID {
 		return domain.Task{}, errors.New("two distinct MySQL instances are required")
 	}
-	if !req.BaselineReady {
-		return domain.Task{}, errors.New("baseline_ready must be true; V1 will not configure GTID replication onto an unconfirmed replica baseline")
+	if req.BaselineReady == req.AutoBaseline {
+		return domain.Task{}, errors.New("choose exactly one: confirm an existing baseline or automatically seed an empty replica")
 	}
 	if !req.Confirmed {
 		return domain.Task{}, errors.New("GTID replication creation is R3 and requires confirmed=true")
@@ -95,7 +99,8 @@ func (s *Service) CreateTask(ctx context.Context, req CreateRequest) (domain.Tas
 	params, _ := json.Marshal(createParams{
 		PrimaryInstanceID: req.PrimaryInstanceID,
 		ReplicaInstanceID: req.ReplicaInstanceID,
-		BaselineReady:     true,
+		BaselineReady:     req.BaselineReady,
+		AutoBaseline:      req.AutoBaseline,
 		Confirmed:         true,
 	})
 	key := fmt.Sprintf("mysql.replication:%d:%d", req.PrimaryInstanceID, req.ReplicaInstanceID)
@@ -112,7 +117,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if err := json.Unmarshal([]byte(t.ParametersJSON), &p); err != nil {
 			return nil, err
 		}
-		if !p.Confirmed || !p.BaselineReady {
+		if !p.Confirmed || p.BaselineReady == p.AutoBaseline {
 			return nil, errors.New("replication safety confirmation is missing")
 		}
 
@@ -162,6 +167,22 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if int64Value(primaryCheck["server_id"]) == int64Value(replicaCheck["server_id"]) {
 			return nil, errors.New("primary and replica server_id must be unique")
 		}
+		if p.AutoBaseline {
+			if stringValue(primaryCheck["version"]) != stringValue(replicaCheck["version"]) || !supportsSafeGTIDDump(stringValue(primaryCheck["version"])) {
+				return nil, errors.New("automatic baseline requires matching MySQL 8.0.32+ versions")
+			}
+			if boolValue(primaryCheck["replication_configured"]) || int64Value(primaryCheck["non_innodb_tables"]) != 0 || len(stringList(primaryCheck["user_databases"])) == 0 {
+				return nil, errors.New("automatic baseline requires a standalone source with user databases containing only InnoDB tables")
+			}
+			if boolValue(replicaCheck["replication_configured"]) || stringValue(replicaCheck["gtid_executed"]) != "" || len(stringList(replicaCheck["user_databases"])) != 0 {
+				return nil, errors.New("automatic baseline requires an empty replica with no GTIDs or replication channel")
+			}
+			if _, err := step(3, "PREPARE_BASELINE", "Export and import consistent GTID baseline", 30, func() (any, error) {
+				return s.seedReplica(ctx, t.ID, primary, replica)
+			}); err != nil {
+				return nil, err
+			}
+		}
 
 		replPassword, err := security.RandomPassword(32)
 		if err != nil {
@@ -181,7 +202,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
-		if _, err := step(3, "CREATE_REPLICATION_USER", "Create replication user", 35, func() (any, error) {
+		if _, err := step(4, "CREATE_REPLICATION_USER", "Create replication user", 45, func() (any, error) {
 			return s.dispatchCreate(ctx, t.ID, primary, map[string]any{
 				"mode": "primary_prepare", "replication_user": replUser, "replication_password": replPassword,
 				"replication_host": replica.Host.IPAddress,
@@ -190,7 +211,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
-		if _, err := step(4, "CONFIGURE_REPLICA", "Configure replica", 55, func() (any, error) {
+		if _, err := step(5, "CONFIGURE_REPLICA", "Configure replica", 60, func() (any, error) {
 			return s.dispatchCreate(ctx, t.ID, replica, map[string]any{
 				"mode": "replica_configure", "replication_user": replUser, "replication_password": replPassword,
 				"source_host": primary.Host.IPAddress, "source_port": primary.Instance.Port,
@@ -200,7 +221,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 
 		var status map[string]any
-		if out, err := step(5, "VERIFY_REPLICATION", "Verify replication", 75, func() (any, error) {
+		if out, err := step(6, "VERIFY_REPLICATION", "Verify replication", 75, func() (any, error) {
 			return s.dispatchStatus(ctx, t.ID, replica)
 		}); err != nil {
 			return nil, err
@@ -221,7 +242,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := step(6, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) {
+		if _, err := step(7, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) {
 			if err := s.dbs.UpdateRole(ctx, rec.PrimaryInstanceID, "primary"); err != nil {
 				return nil, err
 			}
@@ -232,10 +253,10 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}); err != nil {
 			return nil, err
 		}
-		_, _ = step(7, "ENABLE_REPLICATION_ALERTS", "Enable replication alerts", 95, func() (any, error) {
+		_, _ = step(8, "ENABLE_REPLICATION_ALERTS", "Enable replication alerts", 95, func() (any, error) {
 			return map[string]any{"enabled": true, "defaults": []string{"thread_down", "lag"}}, nil
 		})
-		_, _ = step(8, "FINAL_VERIFY", "Final verify", 100, func() (any, error) { return s.dispatchStatus(ctx, t.ID, replica) })
+		_, _ = step(9, "FINAL_VERIFY", "Final verify", 100, func() (any, error) { return s.dispatchStatus(ctx, t.ID, replica) })
 
 		return map[string]any{"replication_id": rec.ID, "primary_instance_id": rec.PrimaryInstanceID, "replica_instance_id": rec.ReplicaInstanceID, "status": "healthy"}, nil
 	}
@@ -328,7 +349,11 @@ func (s *Service) dispatchCreate(ctx context.Context, _ int64, rt runtime, extra
 	for k, v := range extra {
 		params[k] = v
 	}
-	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.replication.create", Risk: string(p.Risk), Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 300, Params: params})
+	timeout := 300
+	if strings.HasPrefix(stringValue(extra["mode"]), "baseline_") {
+		timeout = 43200
+	}
+	resp, err := s.dispatcher.Dispatch(ctx, rt.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.replication.create", Risk: string(p.Risk), Confirmed: true, ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: timeout, Params: params})
 	if err != nil {
 		return nil, err
 	}
@@ -347,6 +372,35 @@ func (s *Service) dispatchStatus(ctx context.Context, _ int64, rt runtime) (map[
 
 func boolValue(v any) bool     { x, _ := v.(bool); return x }
 func stringValue(v any) string { x, _ := v.(string); return x }
+func stringList(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return x
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+func supportsSafeGTIDDump(v string) bool {
+	parts := strings.Split(v, ".")
+	if len(parts) < 3 {
+		return false
+	}
+	major, e1 := strconv.Atoi(parts[0])
+	minor, e2 := strconv.Atoi(parts[1])
+	patchText := parts[2]
+	if end := strings.IndexFunc(patchText, func(r rune) bool { return r < '0' || r > '9' }); end >= 0 {
+		patchText = patchText[:end]
+	}
+	patch, e3 := strconv.Atoi(patchText)
+	return e1 == nil && e2 == nil && e3 == nil && (major > 8 || major == 8 && (minor > 0 || minor == 0 && patch >= 32))
+}
 func int64Value(v any) int64 {
 	switch x := v.(type) {
 	case float64:

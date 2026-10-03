@@ -50,6 +50,11 @@ async function submit(){
  busy.value=true
  try{
   const body:Record<string,any>={...form,confirmed:confirmed.value}
+  if(operation.value.path==='/mysql/replications'){
+   body.auto_baseline=body.baseline_mode==='自动导入空白副本'
+   body.baseline_ready=body.baseline_mode==='人工已准备一致基线'
+   delete body.baseline_mode
+  }
   for(const f of operation.value.fields){if(f.type==='list')body[f.key]=String(body[f.key]||'').split(',').map(s=>s.trim()).filter(Boolean);else if(body[f.key]==='')delete body[f.key]}
   const path=operation.value.path.replace(':id',String(body.instance_id))
   if(operation.value.path.includes(':id'))delete body.instance_id

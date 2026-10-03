@@ -89,6 +89,22 @@ func mysqlRestore(ctx context.Context, workDir string, params map[string]any) (m
 	if err != nil || count != 0 {
 		return nil, errors.New("restore target must have no user databases")
 	}
+	if baseline, _ := params["replication_baseline"].(bool); baseline {
+		gtid, err := runMySQLQuery(ctx, base, run, password, "SELECT @@GLOBAL.gtid_executed;", false)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(gtid) != "" {
+			return nil, errors.New("replication baseline target must have no executed GTIDs")
+		}
+		status, err := mysqlReplicationStatus(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		if configured, _ := status["configured"].(bool); configured {
+			return nil, errors.New("replication baseline target already has a replication channel")
+		}
+	}
 	cfg, err := os.CreateTemp(workDir, "restore-client-*.cnf")
 	if err != nil {
 		return nil, err

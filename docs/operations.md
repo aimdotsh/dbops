@@ -50,7 +50,7 @@ SuperAdmin 在“操作中心”创建项目、环境和用户；分配主机的
 
 软件仓库现在可保存并下载目标架构匹配的 MySQL tar.gz，以及 Percona XtraBackup ARM64/AMD64 `.deb` 包。MySQL 安装器只接受二进制 tar.gz/tgz；`.deb` 包需先在目标主机安装或解包，Agent 物理备份动作使用其中的可执行文件，不会被 MySQL 安装器误安装。`POST /mysql/instances/:id/backups` 的 `engine` 可选 `mysqldump`（默认，逻辑备份）或 `xtrabackup`（物理备份），物理备份同时传入 Agent 上的 `tool_path`、`output_dir`，可选 `file_name` 作为备份目录名；动作会返回未 prepare 的物理目录，恢复接口可完成副本校验、`--prepare` 和暂存 `--copy-back`，最终切换需人工核查。选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。
 
-GTID 复制配置要求操作者已完成一致基线准备，并明确确认 baseline_ready。当前流程不自动传输或还原基线，不代表支持一键从任意已有数据建立复制。复制配置成功时，Agent 会在从库执行 `SET PERSIST super_read_only=ON`，重启后继续拒绝业务写入。平台还会将主从角色写回资产记录。数据库状态由定期采集结果更新，采集失败显示 offline；采集间隔内的状态可能尚未刷新。
+GTID 复制可选择 `auto_baseline=true` 自动为**完全空白**副本导入逻辑快照，或选择 `baseline_ready=true` 确认人工准备的一致基线；两者只能选一个，均需 `confirmed=true`。自动模式会检查版本、InnoDB 用户表、目标业务库、GTID 和复制通道。快照期间须暂停相关 DDL。跨主机文件走认证 Agent 通道并校验 SHA256。导入失败时，任务停止并保留目标现场及 Agent 私有快照，由 DBA 核查后处理；不要直接重试或覆盖已有数据。复制配置成功时，Agent 会在从库执行 `SET PERSIST super_read_only=ON`，重启后继续拒绝业务写入。平台还会将主从角色写回资产记录。数据库状态由定期采集结果更新，采集失败显示 offline；采集间隔内的状态可能尚未刷新。
 
 MySQL 归档策略使用 Agent 主机上的 pt-archiver。先预检并核对源/目标表、主键、筛选条件和 dry-run，再用 `confirmed=true` 启动。`max_replication_lag` 大于 0 时，Server 在启动前和运行期间检查该主库所有已登记副本；副本离线、复制线程不健康或延迟未知/超限会阻止或停止归档。`max_threads_running` 大于 0 时，Agent 在执行前和运行期间检查源库负载；两个阈值设为 0 表示关闭对应保护。运行期检查约每 2 秒一次，不能替代数据库资源限额。当前 pt-archiver 3.2.1 的 `--sleep` 接受整数秒，正数 `sleep_ms` 会向上取整到秒，例如 100 ms 实际为 1 秒。
 

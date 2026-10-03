@@ -107,7 +107,7 @@ func (e *Executor) ExecuteWithReporter(parent context.Context, req agentproto.Ac
 	case "mysql.replication.precheck":
 		return mysqlReplicationPrecheck(ctx, req.Params)
 	case "mysql.replication.create":
-		return mysqlReplicationCreate(ctx, req.Params)
+		return mysqlReplicationCreate(ctx, e.workDir, req.Params)
 	case "mysql.replication.status":
 		return mysqlReplicationStatus(ctx, req.Params)
 	case "mysql.start", "mysql.stop", "mysql.restart":
