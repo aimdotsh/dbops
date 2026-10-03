@@ -37,3 +37,16 @@ ssh tx50 'systemctl is-active dbops-agent.service'
 如果 SSH 报远端端口占用，先在 `tx50` 运行 `ss -ltn | grep 18089`，确认是否已有隧道。若本机健康接口可用而远端请求失败，检查 SSH 进程是否还在、`ExitOnForwardFailure` 的报错，以及 `tx50` 到 SSH 服务的连接。若远端健康接口可用但 Agent 离线，检查 `systemctl status dbops-agent.service` 和 `journalctl -u dbops-agent.service -n 50 --no-pager`。不要在文档或工单中粘贴 Agent 凭据和数据库密码。
 
 这条临时隧道依赖操作员电脑在线。长期部署应为目标主机提供可持续访问的 HTTPS 平台地址，并配置 `DBOPS_PUBLIC_URL`、Agent TLS 和网络访问策略；不要把此演示隧道当作生产入口。
+
+## tx180 测试主机
+
+`tx180`（OpenCloudOS 9.4，x86_64）已在 2026-10-03 通过在线向导纳管，平台主机和 Agent 均为 #74。Agent 服务 `dbops-agent.service` 已启用并在线，一次性 bootstrap token 已删除。它使用与 `tx50` 不同的远端回环端口：
+
+```sh
+ssh -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -N -R 127.0.0.1:18090:127.0.0.1:18089 tx180
+```
+
+用 `ssh tx180 'curl -fsS http://127.0.0.1:18090/api/v1/health'` 核对隧道，再在资源中心确认 Agent 在线。断线后重新运行上述命令，Agent 会使用持久凭据重连。tx180 原有 Docker 应用未改动；根分区仅余约 5.6 GiB（使用率 91%），当前只作主机纳管测试，不在其上部署 MySQL 副本。

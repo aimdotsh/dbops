@@ -549,10 +549,8 @@ func run(client *ssh.Client, command, stdin string) (string, error) {
 	if stdin != "" {
 		session.Stdin = strings.NewReader(stdin)
 	}
-	var output bytes.Buffer
-	session.Stdout, session.Stderr = &output, &output
-	err = session.Run(command)
-	return output.String(), err
+	output, err := session.CombinedOutput(command)
+	return string(output), err
 }
 
 func upload(client *ssh.Client, path string, content io.Reader) error {
