@@ -7,6 +7,7 @@
 | POST /hosts/onboarding/precheck | 使用一次性 SSH 凭据检查 Linux/systemd/架构并返回主机指纹 | DBA / SuperAdmin |
 | POST /hosts/onboarding/connectivity | 从目标主机检查 server_url 的平台健康接口能否访问；需 confirmed 和主机指纹 | DBA / SuperAdmin |
 | POST /hosts/onboarding | 提交已确认指纹，安装并注册 Agent | DBA / SuperAdmin |
+| POST /hosts/:id/ssh-diagnosis | 使用一次性 SSH 凭据和已确认的主机指纹，读取该主机数据库的进程、服务和端口证据 | DBA / SuperAdmin |
 | POST /mysql/precheck | agent_id 与预检参数，创建只读任务 | DBA / SuperAdmin |
 | POST /mysql/restores | backup_id、target_instance_id、confirmed:true | DBA / SuperAdmin |
 | POST /mysql/restores/new-host | backup_id、agent_id、package_id、name、port；可选 tool_path 和安装布局，无需 confirmed | DBA / SuperAdmin |
@@ -39,6 +40,8 @@
 ## 例子
 
 在线纳管先预检，再将响应中的 `host_key_fingerprint` 原样带入正式请求。两次请求都要带 SSH 认证字段；这些字段不会保存。`server_url` 是目标主机访问平台的地址。
+
+SSH 核查复用预检的认证字段。将已核对的 `host_key_fingerprint` 和 `confirmed: true` 提交到 `/hosts/:id/ssh-diagnosis`。返回的 `process_running`、`port_listening`、`process_not_observed` 是操作系统证据，不代表 SQL 健康；核查不修改实例状态。
 
 ```json
 {

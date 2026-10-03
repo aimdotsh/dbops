@@ -135,6 +135,7 @@ func New(
 	protected.POST("/hosts/onboarding/connectivity", adminDBA, s.checkHostOnboardingConnectivity)
 	protected.POST("/hosts/onboarding", adminDBA, s.onboardHost)
 	protected.GET("/hosts/:id", read, s.getHost)
+	protected.POST("/hosts/:id/ssh-diagnosis", adminDBA, s.diagnoseHostSSH)
 	protected.GET("/agents", read, s.listAgents)
 	protected.GET("/agents/:id", read, s.getAgent)
 	protected.GET("/databases", read, s.listDatabases)
@@ -418,11 +419,31 @@ func ok(c *gin.Context, data any) {
 	case domain.Task:
 		v.ParametersJSON = security.RedactJSON(v.ParametersJSON)
 		v.ResultJSON = security.RedactJSON(v.ResultJSON)
+		if v.ErrorMessage != nil {
+			redacted := security.RedactText(*v.ErrorMessage)
+			v.ErrorMessage = &redacted
+		}
 		data = v
 	case []domain.Task:
 		for i := range v {
 			v[i].ParametersJSON = security.RedactJSON(v[i].ParametersJSON)
 			v[i].ResultJSON = security.RedactJSON(v[i].ResultJSON)
+			if v[i].ErrorMessage != nil {
+				redacted := security.RedactText(*v[i].ErrorMessage)
+				v[i].ErrorMessage = &redacted
+			}
+		}
+		data = v
+	case []domain.TaskStep:
+		for i := range v {
+			v[i].ErrorMessage = security.RedactText(v[i].ErrorMessage)
+			v[i].OutputJSON = security.RedactJSON(v[i].OutputJSON)
+		}
+		data = v
+	case []domain.TaskEvent:
+		for i := range v {
+			v[i].Message = security.RedactText(v[i].Message)
+			v[i].PayloadJSON = security.RedactJSON(v[i].PayloadJSON)
 		}
 		data = v
 	}

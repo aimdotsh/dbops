@@ -8,6 +8,8 @@
 
 在线纳管支持 SSH 密码和 PEM/OpenSSH 私钥，非 root 用户使用 sudo。SSH 密码、私钥、口令及 sudo 密码只在请求内使用，不保存、不进入任务记录。`server_url` 必须是目标主机可达的平台 HTTP/HTTPS 地址，通常与 `DBOPS_PUBLIC_URL` 一致；自签名 HTTPS 需一并提供 CA。预检后先调用 `POST /api/v1/hosts/onboarding/connectivity`，平台通过 SSH 转发让目标主机连接平台健康接口，成功后才安装；正式安装会再次检查，避免仅凭填写地址就留下离线 Agent。强制 mTLS 模式需要每台 Agent 的独立客户端证书，当前在线入口不会代签或传输该证书，因此会拒绝自动安装，须使用下方手工流程。在线安装是同步的受审计管理操作；若 HTTP 请求中断，应先在目标主机检查 `systemctl status dbops-agent`，再决定重试，避免把网络超时误判为未安装。
 
+Agent 断开时，数据库状态显示“Agent 不可达”。DBA 可在“资源中心 → 主机”执行 SSH 只读核查。先用一次性 SSH 密码或私钥预检，再从主机控制台核对指纹。平台在确认后检查主机名、MySQL systemd 状态、Oracle PMON 进程和数据库端口监听。注册 IP 不可从平台访问时，可填写同一主机的公网 SSH 地址；主机名仍须与纳管记录相同。结果只说明进程和端口证据，不会把实例直接改成 online，也不能证明 SQL、数据或复制健康。凭据不保存；若要无人值守自动核查，需要另行设计并授权平台保管专用只读 SSH 凭据。
+
 安装数据库需要 Agent 对安装目录和系统服务具备相应权限。先使用专用测试主机；安装不会覆盖已有配置、非空数据目录或已有任务 marker。失败后需要检查现场，不会自动删除数据库文件或重复初始化。
 
 本地演示环境通过 SSH 反向隧道接入 `tx50` 的具体步骤见 [接入说明](demo-reverse-ssh-tunnel.md)。
@@ -50,7 +52,7 @@ SuperAdmin 在“操作中心”创建项目、环境和用户；分配主机的
 
 软件仓库现在可保存并下载目标架构匹配的 MySQL tar.gz，以及 Percona XtraBackup ARM64/AMD64 `.deb` 包。MySQL 安装器只接受二进制 tar.gz/tgz；`.deb` 包需先在目标主机安装或解包，Agent 物理备份动作使用其中的可执行文件，不会被 MySQL 安装器误安装。`POST /mysql/instances/:id/backups` 的 `engine` 可选 `mysqldump`（默认，逻辑备份）或 `xtrabackup`（物理备份），物理备份同时传入 Agent 上的 `tool_path`、`output_dir`，可选 `file_name` 作为备份目录名；动作会返回未 prepare 的物理目录，恢复接口可完成副本校验、`--prepare` 和暂存 `--copy-back`，最终切换需人工核查。选择在线 Agent，先预检，再提交安装。生产配置默认使用 systemd；process 模式仅供测试，必须显式启用。首次启动前通过受限 init_file 设置 root 密码；成功认证后移除该文件及配置引用。
 
-GTID 复制可选择 `auto_baseline=true` 自动为**完全空白**副本导入逻辑快照，或选择 `baseline_ready=true` 确认人工准备的一致基线；两者只能选一个，均需 `confirmed=true`。自动模式会检查版本、InnoDB 用户表、目标业务库、GTID 和复制通道。快照期间须暂停相关 DDL。跨主机文件走认证 Agent 通道并校验 SHA256。导入失败时，任务停止并保留目标现场及 Agent 私有快照，由 DBA 核查后处理；不要直接重试或覆盖已有数据。复制配置成功时，Agent 会在从库执行 `SET PERSIST super_read_only=ON`，重启后继续拒绝业务写入。平台还会将主从角色写回资产记录。数据库状态由定期采集结果更新，采集失败显示 offline；采集间隔内的状态可能尚未刷新。
+GTID 复制可选择 `auto_baseline=true` 自动为**完全空白**副本导入逻辑快照，或选择 `baseline_ready=true` 确认人工准备的一致基线；两者只能选一个，均需 `confirmed=true`。自动模式会检查版本、InnoDB 用户表、目标业务库、GTID 和复制通道。快照期间须暂停相关 DDL。跨主机文件走认证 Agent 通道并校验 SHA256。导入失败时，任务停止并保留目标现场及 Agent 私有快照，由 DBA 核查后处理；不要直接重试或覆盖已有数据。复制配置成功时，Agent 会在从库执行 `SET PERSIST super_read_only=ON`，重启后继续拒绝业务写入。平台还会将主从角色写回资产记录。数据库状态由定期采集结果更新；Agent 不可达显示 unreachable，Agent 在线但数据库采集失败显示 offline。采集间隔内的状态可能尚未刷新。
 
 MySQL 归档策略使用 Agent 主机上的 pt-archiver。先预检并核对源/目标表、主键、筛选条件和 dry-run，再用 `confirmed=true` 启动。`max_replication_lag` 大于 0 时，Server 在启动前和运行期间检查该主库所有已登记副本；副本离线、复制线程不健康或延迟未知/超限会阻止或停止归档。`max_threads_running` 大于 0 时，Agent 在执行前和运行期间检查源库负载；两个阈值设为 0 表示关闭对应保护。运行期检查约每 2 秒一次，不能替代数据库资源限额。当前 pt-archiver 3.2.1 的 `--sleep` 接受整数秒，正数 `sleep_ms` 会向上取整到秒，例如 100 ms 实际为 1 秒。
 

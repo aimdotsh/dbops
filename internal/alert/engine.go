@@ -134,11 +134,17 @@ func (e *Engine) EvaluateOnce(ctx context.Context) error {
 		return err
 	}
 	for _, snap := range databases {
+		fingerprint := fmt.Sprintf("DatabaseDown:database:%d", snap.ResourceID)
+		if snap.Payload["collection_state"] == "agent_unreachable" {
+			if err = e.resolve(ctx, fingerprint, now); err != nil {
+				return err
+			}
+			continue
+		}
 		value, known := metricValue("up", snap, now)
 		if !known {
 			continue
 		}
-		fingerprint := fmt.Sprintf("DatabaseDown:database:%d", snap.ResourceID)
 		if value == 0 || now.Sub(snap.CollectedAt) > 2*time.Minute {
 			if err = e.upsertFiring(ctx, "database", snap.ResourceID, fingerprint, "P1", "database is unreachable or monitoring is stale", "{}", now); err != nil {
 				return err

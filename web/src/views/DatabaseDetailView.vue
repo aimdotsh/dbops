@@ -13,9 +13,10 @@ const host=computed(()=>hosts.value.find(x=>Number(x.id)===Number(database.value
 const agent=computed(()=>agents.value.find(x=>Number(x.host_id)===Number(database.value?.host_id)))
 const metadata=computed(()=>{try{return JSON.parse(database.value?.metadata_json||'{}')}catch{return {}}})
 const relatedTasks=computed(()=>tasks.value.filter(x=>Number(x.target_id)===id.value||String(x.parameters_json||'').includes(`\"instance_id\":${id.value}`)).slice(0,5))
-const relatedAlerts=computed(()=>alerts.value.filter(x=>Number(x.resource_id)===id.value||String(x.resource_type).toLowerCase()==='database'))
+const relatedAlerts=computed(()=>alerts.value.filter(x=>String(x.resource_type).toLowerCase()==='database'&&Number(x.resource_id)===id.value))
 const endpoint=computed(()=>`${host.value?.ip_address||'--'}:${database.value?.port||'--'}`)
-const healthy=computed(()=>['online','healthy','running','success'].includes(String(database.value?.status).toLowerCase()))
+const agentUnreachable=computed(()=>agent.value?.status==='offline'||database.value?.status==='unreachable')
+const healthy=computed(()=>!agentUnreachable.value&&['online','healthy','running','success'].includes(String(database.value?.status).toLowerCase()))
 const statusType=computed(()=>(healthy.value?'success':'warning') as any)
 const isOracle=computed(()=>String(database.value?.db_type).toLowerCase()==='oracle')
 const instanceMode=computed(()=>route.query.view==='instance')
@@ -46,7 +47,8 @@ onMounted(load)
     <div class="service-tabs"><button v-for="(item,index) in tabs" :key="item.label" :class="{active:index===0}" @click="item.action"><el-icon><component :is="item.icon"/></el-icon>{{item.label}}</button></div>
    </div>
    <div class="detail-subnav"><span v-for="item in subnav" :key="item" :class="{active:(item==='基本信息'&&!instanceMode&&!tablespaceMode)||(item==='实例详情'&&instanceMode)||(item==='表空间管理'&&tablespaceMode)}" @click="selectSubnav(item)">{{item}}</span></div>
-   <el-alert v-if="!healthy" title="当前实例状态异常，执行变更前请先核查 Agent 连接、数据库进程和最近任务。" type="warning" show-icon :closable="false" class="detail-alert"/>
+   <el-alert v-if="agentUnreachable" title="Agent 不可达，平台暂时无法确认数据库进程状态。请先恢复 Agent 连接，或到资源中心对主机执行 SSH 只读核查。" type="warning" show-icon :closable="false" class="detail-alert"/>
+   <el-alert v-else-if="!healthy" title="当前实例状态异常，执行变更前请先核查 Agent 连接、数据库进程和最近任务。" type="warning" show-icon :closable="false" class="detail-alert"/>
    <OracleTablespacePanel v-if="tablespaceMode" :instance-id="id"/>
    <template v-else-if="!instanceMode">
    <section class="service-panel">

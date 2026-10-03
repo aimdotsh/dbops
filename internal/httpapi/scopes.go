@@ -150,6 +150,8 @@ func (s *Server) scopeGuard(c *gin.Context) {
 	path := c.FullPath()
 	kind := ""
 	switch {
+	case strings.HasPrefix(path, "/api/v1/hosts/onboarding"):
+		// Onboarding actions have no managed host ID yet.
 	case strings.HasPrefix(path, "/api/v1/hosts/"):
 		kind = "host"
 	case strings.HasPrefix(path, "/api/v1/agents/"):

@@ -2,8 +2,17 @@ package security
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 )
+
+var signedQueryValue = regexp.MustCompile(`(?i)([?&](?:sig|signature|token|access_token|api_key|apikey)=)[^&\s"']+`)
+
+// RedactText removes credentials embedded in diagnostic URLs before they reach
+// persistent task records or API responses.
+func RedactText(value string) string {
+	return signedQueryValue.ReplaceAllString(value, "${1}***REDACTED***")
+}
 
 var sensitiveFragments = []string{
 	"password", "passwd", "pwd", "secret", "token", "credential",
@@ -39,6 +48,8 @@ func RedactValue(v any) any {
 			out[i] = RedactValue(value)
 		}
 		return out
+	case string:
+		return RedactText(x)
 	default:
 		return v
 	}

@@ -88,3 +88,45 @@ CREATE TABLE metric_rollups_1d(resource_type TEXT,resource_id INTEGER,bucket_ts 
 		t.Fatalf("expected resolved heartbeat alert, got %+v", resolved)
 	}
 }
+
+func TestAgentUnreachableResolvesDatabaseDownAlert(t *testing.T) {
+	meta, err := sql.Open("sqlite", "file:alert-unreachable-meta?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer meta.Close()
+	metricsDB, err := sql.Open("sqlite", "file:alert-unreachable-metrics?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer metricsDB.Close()
+	if _, err := meta.Exec(`CREATE TABLE alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,resource_type TEXT,resource_id INTEGER,fingerprint TEXT,status TEXT,severity TEXT,message TEXT,started_at TEXT,last_seen_at TEXT,resolved_at TEXT,metadata_json TEXT);`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metricsDB.Exec(`CREATE TABLE metric_latest(resource_type TEXT,resource_id INTEGER,collected_at TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id));CREATE TABLE metric_snapshots_5m(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;CREATE TABLE metric_rollups_1h(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;CREATE TABLE metric_rollups_1d(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;`); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store := metricstore.NewStore(metricsDB)
+	engine := New(slog.Default(), true, 1, meta, store)
+	if err := store.Put(ctx, "database", 7, time.Now().UTC(), map[string]any{"up": 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.EvaluateOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firing, err := engine.List(ctx, "FIRING", 100)
+	if err != nil || len(firing) != 1 {
+		t.Fatalf("expected database alert: %+v %v", firing, err)
+	}
+	if err := store.Put(ctx, "database", 7, time.Now().UTC().Add(time.Second), map[string]any{"collection_state": "agent_unreachable"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.EvaluateOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firing, err = engine.List(ctx, "FIRING", 100)
+	if err != nil || len(firing) != 0 {
+		t.Fatalf("agent disconnect kept database-down alert: %+v %v", firing, err)
+	}
+}

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,12 @@ CREATE TABLE tasks (
 );
 CREATE TABLE backup_jobs (
  id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT, error_message TEXT
+);
+CREATE TABLE task_steps (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, step_no INTEGER NOT NULL,
+ step_code TEXT NOT NULL, step_name TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL,
+ started_at TEXT, finished_at TEXT, output_json TEXT, error_message TEXT, recovery_policy TEXT,
+ UNIQUE(task_id,step_no)
 );`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
@@ -166,5 +173,44 @@ func TestNewHostRestoreLocksBothHostsUntilInterruptedReview(t *testing.T) {
 	}
 	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next == nil {
 		t.Fatal("review did not release lock", next, err)
+	}
+}
+
+func TestFailedTaskClosesRunningStepAndRedactsSignedURL(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	repo := TaskRepo{DB: db}
+	ctx := context.Background()
+	job, err := repo.Create(ctx, domain.Task{TaskType: "mysql.install"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimNext(ctx, "worker", 60)
+	if err != nil || claimed == nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertStep(ctx, domain.TaskStep{TaskID: job.ID, StepNo: 1, StepCode: "DOWNLOAD_PACKAGE", Status: "running", Progress: 32}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateProgress(ctx, job.ID, 100); err != nil {
+		t.Fatal(err)
+	}
+	message := "download failed: https://example.test/pkg?expires=123&sig=secret-value"
+	if err := repo.FinishOwned(ctx, job.ID, "worker", "failed", "{}", message); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := repo.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Status != "failed" || finished.Progress != 99 || finished.ErrorMessage == nil || strings.Contains(*finished.ErrorMessage, "secret-value") {
+		t.Fatalf("invalid terminal task: %+v", finished)
+	}
+	steps, err := repo.ListSteps(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 || steps[0].Status != "failed" || steps[0].FinishedAt == nil || strings.Contains(steps[0].ErrorMessage, "secret-value") {
+		t.Fatalf("running step not closed safely: %+v", steps)
 	}
 }

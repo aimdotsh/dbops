@@ -409,13 +409,17 @@ func (g *Gateway) register(c *client) {
 
 func (g *Gateway) unregister(c *client) {
 	g.mu.Lock()
+	wasCurrent := false
 	if current := g.clients[c.agent.ID]; current == c {
 		delete(g.clients, c.agent.ID)
+		wasCurrent = true
 	}
 	g.mu.Unlock()
 	c.close()
 	_ = c.conn.Close()
-	_ = g.agents.MarkOffline(context.Background(), c.agent.AgentUUID)
+	if wasCurrent {
+		_ = g.agents.MarkOffline(context.Background(), c.agent.AgentUUID)
+	}
 	g.logger.Info("agent disconnected", "agent_id", c.agent.ID, "uuid", c.agent.AgentUUID)
 }
 

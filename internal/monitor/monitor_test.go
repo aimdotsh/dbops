@@ -18,6 +18,15 @@ type monitorDatabases struct {
 	instance domain.DatabaseInstance
 }
 
+type monitorAgents struct {
+	repository.AgentRepository
+	status string
+}
+
+func (a monitorAgents) GetByHostID(context.Context, int64) (domain.Agent, error) {
+	return domain.Agent{Status: a.status}, nil
+}
+
 func (d *monitorDatabases) List(context.Context) ([]domain.DatabaseInstance, error) {
 	return []domain.DatabaseInstance{d.instance}, nil
 }
@@ -62,5 +71,32 @@ func TestTickUpdatesDatabaseAvailability(t *testing.T) {
 	}
 	if dbs.instance.Status != "online" {
 		t.Fatalf("recovered database remained %q", dbs.instance.Status)
+	}
+}
+
+func TestTickMarksAgentDisconnectAsUnreachableWithoutProbingDatabase(t *testing.T) {
+	root := t.TempDir()
+	stores, err := storage.Open(filepath.Join(root, "metadata.db"), filepath.Join(root, "metrics.db"), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stores.Close()
+	if err := storage.Migrate(stores.Metadata, stores.Metrics); err != nil {
+		t.Fatal(err)
+	}
+	dbs := &monitorDatabases{instance: domain.DatabaseInstance{ID: 1, HostID: 4, DBType: "mysql", Status: "online"}}
+	called := false
+	m := &Monitor{Databases: dbs, Agents: monitorAgents{status: "offline"}, Store: metrics.NewStore(stores.Metrics), Collectors: map[string]Collector{
+		"mysql": func(context.Context, int64) (any, error) { called = true; return nil, nil },
+	}}
+	if err := m.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if called || dbs.instance.Status != "unreachable" {
+		t.Fatalf("disconnected agent was treated as a database probe: called=%v status=%s", called, dbs.instance.Status)
+	}
+	snapshot, err := m.Store.Latest(context.Background(), "database", 1)
+	if err != nil || snapshot.Payload["collection_state"] != "agent_unreachable" {
+		t.Fatalf("missing unreachable evidence: %+v %v", snapshot, err)
 	}
 }

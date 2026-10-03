@@ -38,6 +38,7 @@ func TestScopeIsolationAndContentTypeBypass(t *testing.T) {
 	r.Use(func(c *gin.Context) { c.Set(authClaimsKey, auth.Claims{UserID: 1, Roles: []string{auth.RoleDBA}}) }, s.scopeGuard)
 	r.GET("/api/v1/hosts", s.listHosts)
 	r.GET("/api/v1/hosts/:id", s.getHost)
+	r.POST("/api/v1/hosts/onboarding/precheck", func(c *gin.Context) { c.Status(202) })
 	r.POST("/api/v1/mysql/install", func(c *gin.Context) { c.Status(202) })
 	for path, status := range map[string]int{"/api/v1/hosts/1": 200, "/api/v1/hosts/2": 403} {
 		w := httptest.NewRecorder()
@@ -47,6 +48,11 @@ func TestScopeIsolationAndContentTypeBypass(t *testing.T) {
 		}
 	}
 	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/hosts/onboarding/precheck", strings.NewReader(`{"address":"127.0.0.1"}`)))
+	if w.Code != 202 {
+		t.Fatalf("onboarding precheck should be available to scoped DBA: %d %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/hosts", nil))
 	var body struct {
 		Data []map[string]any `json:"data"`

@@ -239,7 +239,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		},
 	}}
 	maintenance := scheduler.New(logger, cfg.Scheduler.Enabled, cfg.Scheduler.ScanIntervalSeconds)
-	databaseMonitor := &monitor.Monitor{Databases: dbRepo, Store: metricsStore, Collectors: map[string]monitor.Collector{
+	databaseMonitor := &monitor.Monitor{Databases: dbRepo, Agents: agentRepo, Store: metricsStore, Collectors: map[string]monitor.Collector{
 		"mysql":      mysqlBackup.Metrics,
 		"oracle":     func(ctx context.Context, id int64) (any, error) { return oracleService.Status(ctx, id) },
 		"postgres":   func(ctx context.Context, id int64) (any, error) { return postgresService.Status(ctx, id) },

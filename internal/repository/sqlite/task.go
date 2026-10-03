@@ -10,6 +10,7 @@ import (
 
 	"github.com/aimdotsh/dbops/internal/domain"
 	"github.com/aimdotsh/dbops/internal/repository"
+	"github.com/aimdotsh/dbops/internal/security"
 )
 
 type TaskRepo struct{ DB *sql.DB }
@@ -97,9 +98,20 @@ func (r TaskRepo) UpdateStatus(ctx context.Context, id int64, status string, pro
 		resultJSON = "{}"
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := r.DB.ExecContext(ctx, "UPDATE tasks SET status=?, progress=?, result_json=?, error_message=NULLIF(?,''), finished_at=CASE WHEN ? IN ('success','failed','cancelled','timeout') THEN ? ELSE finished_at END, lease_owner=NULL, lease_expires_at=NULL WHERE id=?",
-		status, progress, resultJSON, errMsg, status, now, id)
-	return err
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, "UPDATE tasks SET status=?, progress=CASE WHEN ?='success' THEN 100 WHEN ?>=100 THEN 99 ELSE ? END, result_json=?, error_message=NULLIF(?,''), finished_at=CASE WHEN ? IN ('success','failed','cancelled','timeout') THEN ? ELSE finished_at END, lease_owner=NULL, lease_expires_at=NULL WHERE id=?",
+		status, status, progress, progress, security.RedactJSON(resultJSON), security.RedactText(errMsg), status, now, id)
+	if err != nil {
+		return err
+	}
+	if err := finishRunningSteps(ctx, tx, id, status, errMsg, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r TaskRepo) UpdateProgress(ctx context.Context, id int64, progress int) error {
@@ -114,19 +126,32 @@ func (r TaskRepo) UpdateProgress(ctx context.Context, id int64, progress int) er
 }
 
 func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
-	res, err := r.DB.ExecContext(ctx, "UPDATE tasks SET status='interrupted', lease_owner=NULL, lease_expires_at=NULL WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
-		time.Now().UTC().Format(time.RFC3339))
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, "UPDATE tasks SET status='interrupted',progress=MIN(progress,99),lease_owner=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?", now)
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE task_steps SET status='interrupted',finished_at=?,
+ error_message=COALESCE(error_message,'task lease expired; verify agent state before retry')
+ WHERE status='running' AND task_id IN (SELECT id FROM tasks WHERE status='interrupted')`, now); err != nil {
 		return 0, err
 	}
 	// A cancelled context or process crash can prevent backup handlers from
 	// recording failure. Reconcile only unfinished records, never verified backups.
-	_, err = r.DB.ExecContext(ctx, `UPDATE backup_jobs SET status='failed',finished_at=?,
+	_, err = tx.ExecContext(ctx, `UPDATE backup_jobs SET status='failed',finished_at=?,
  error_message='task ended without a verified backup; inspect agent output before retry'
  WHERE status IN ('pending','running') AND task_id IN
  (SELECT id FROM tasks WHERE status IN ('interrupted','cancelled','failed','timeout'))`,
-		time.Now().UTC().Format(time.RFC3339))
+		now)
 	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
 	return res.RowsAffected()
@@ -196,8 +221,34 @@ func (r TaskRepo) RenewLease(ctx context.Context, id int64, owner string, second
 }
 
 func (r TaskRepo) FinishOwned(ctx context.Context, id int64, owner, status, result, message string) error {
-	res, err := r.DB.ExecContext(ctx, `UPDATE tasks SET status=?,progress=CASE WHEN ?='success' THEN 100 ELSE progress END,result_json=?,error_message=NULLIF(?,''),finished_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_owner=?`, status, status, result, message, time.Now().UTC().Format(time.RFC3339), id, owner)
-	return requireOwned(res, err)
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET status=?,progress=CASE WHEN ?='success' THEN 100 WHEN progress>=100 THEN 99 ELSE progress END,result_json=?,error_message=NULLIF(?,''),finished_at=?,lease_owner=NULL,lease_expires_at=NULL WHERE id=? AND status='running' AND lease_owner=?`, status, status, security.RedactJSON(result), security.RedactText(message), now, id, owner)
+	if err = requireOwned(res, err); err != nil {
+		return err
+	}
+	if err = finishRunningSteps(ctx, tx, id, status, message, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func finishRunningSteps(ctx context.Context, tx *sql.Tx, taskID int64, status, message, now string) error {
+	stepStatus := status
+	if status == "timeout" || status == "cancelled" {
+		stepStatus = "interrupted"
+	}
+	if status != "success" && status != "failed" && status != "interrupted" && status != "timeout" && status != "cancelled" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE task_steps SET status=?,finished_at=?,
+ error_message=CASE WHEN ?='success' THEN error_message ELSE COALESCE(error_message,NULLIF(?,'')) END
+ WHERE task_id=? AND status='running'`, stepStatus, now, status, security.RedactText(message), taskID)
+	return err
 }
 
 func requireOwned(res sql.Result, err error) error {

@@ -21,3 +21,14 @@ func TestRedactJSON(t *testing.T) {
 		t.Fatalf("password not redacted: %v", v)
 	}
 }
+
+func TestRedactSignedURLInTextAndJSON(t *testing.T) {
+	message := `download http://127.0.0.1/pkg?expires=123&sig=top-secret failed`
+	if got := RedactText(message); strings.Contains(got, "top-secret") || !strings.Contains(got, "sig=***REDACTED***") {
+		t.Fatalf("signed URL leaked: %s", got)
+	}
+	got := RedactJSON(`{"error":"` + message + `"}`)
+	if strings.Contains(got, "top-secret") {
+		t.Fatalf("nested signed URL leaked: %s", got)
+	}
+}
