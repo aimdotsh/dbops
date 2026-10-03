@@ -167,7 +167,9 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if int64Value(primaryCheck["server_id"]) == int64Value(replicaCheck["server_id"]) {
 			return nil, errors.New("primary and replica server_id must be unique")
 		}
+		stepOffset := 0
 		if p.AutoBaseline {
+			stepOffset = 1
 			if stringValue(primaryCheck["version"]) != stringValue(replicaCheck["version"]) || !supportsSafeGTIDDump(stringValue(primaryCheck["version"])) {
 				return nil, errors.New("automatic baseline requires matching MySQL 8.0.32+ versions")
 			}
@@ -202,7 +204,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
-		if _, err := step(4, "CREATE_REPLICATION_USER", "Create replication user", 45, func() (any, error) {
+		if _, err := step(3+stepOffset, "CREATE_REPLICATION_USER", "Create replication user", 45, func() (any, error) {
 			return s.dispatchCreate(ctx, t.ID, primary, map[string]any{
 				"mode": "primary_prepare", "replication_user": replUser, "replication_password": replPassword,
 				"replication_host": replica.Host.IPAddress,
@@ -211,7 +213,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 			return nil, err
 		}
 
-		if _, err := step(5, "CONFIGURE_REPLICA", "Configure replica", 60, func() (any, error) {
+		if _, err := step(4+stepOffset, "CONFIGURE_REPLICA", "Configure replica", 60, func() (any, error) {
 			return s.dispatchCreate(ctx, t.ID, replica, map[string]any{
 				"mode": "replica_configure", "replication_user": replUser, "replication_password": replPassword,
 				"source_host": primary.Host.IPAddress, "source_port": primary.Instance.Port,
@@ -221,7 +223,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}
 
 		var status map[string]any
-		if out, err := step(6, "VERIFY_REPLICATION", "Verify replication", 75, func() (any, error) {
+		if out, err := step(5+stepOffset, "VERIFY_REPLICATION", "Verify replication", 75, func() (any, error) {
 			return s.dispatchStatus(ctx, t.ID, replica)
 		}); err != nil {
 			return nil, err
@@ -242,7 +244,7 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := step(7, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) {
+		if _, err := step(6+stepOffset, "REGISTER_TOPOLOGY", "Register topology", 90, func() (any, error) {
 			if err := s.dbs.UpdateRole(ctx, rec.PrimaryInstanceID, "primary"); err != nil {
 				return nil, err
 			}
@@ -253,10 +255,10 @@ func (s *Service) Handler() func(context.Context, domain.Task) (any, error) {
 		}); err != nil {
 			return nil, err
 		}
-		_, _ = step(8, "ENABLE_REPLICATION_ALERTS", "Enable replication alerts", 95, func() (any, error) {
+		_, _ = step(7+stepOffset, "ENABLE_REPLICATION_ALERTS", "Enable replication alerts", 95, func() (any, error) {
 			return map[string]any{"enabled": true, "defaults": []string{"thread_down", "lag"}}, nil
 		})
-		_, _ = step(9, "FINAL_VERIFY", "Final verify", 100, func() (any, error) { return s.dispatchStatus(ctx, t.ID, replica) })
+		_, _ = step(8+stepOffset, "FINAL_VERIFY", "Final verify", 100, func() (any, error) { return s.dispatchStatus(ctx, t.ID, replica) })
 
 		return map[string]any{"replication_id": rec.ID, "primary_instance_id": rec.PrimaryInstanceID, "replica_instance_id": rec.ReplicaInstanceID, "status": "healthy"}, nil
 	}
