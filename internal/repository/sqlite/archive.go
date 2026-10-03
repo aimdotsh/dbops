@@ -19,9 +19,6 @@ func (r ArchivePolicyRepo) Create(ctx context.Context, p domain.ArchivePolicy) (
 	if p.SleepMS < 0 {
 		p.SleepMS = 0
 	}
-	if p.MaxReplicationLag <= 0 {
-		p.MaxReplicationLag = 30
-	}
 	if p.OptionsJSON == "" {
 		p.OptionsJSON = "{}"
 	}

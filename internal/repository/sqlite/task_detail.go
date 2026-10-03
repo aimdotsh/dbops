@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aimdotsh/dbops/internal/domain"
+	"github.com/aimdotsh/dbops/internal/security"
 )
 
 func (r TaskRepo) AddEvent(ctx context.Context, event domain.TaskEvent) error {
@@ -26,8 +27,8 @@ VALUES(?,?,?,?,?,?,?)`,
 		event.EventType,
 		nullString(event.StepCode),
 		event.Level,
-		event.Message,
-		event.PayloadJSON,
+		security.RedactText(event.Message),
+		security.RedactJSON(event.PayloadJSON),
 	)
 	return err
 }
@@ -83,8 +84,8 @@ ON CONFLICT(task_id,step_no) DO UPDATE SET
 		step.Status,
 		step.Progress,
 		now,
-		step.OutputJSON,
-		step.ErrorMessage,
+		security.RedactJSON(step.OutputJSON),
+		security.RedactText(step.ErrorMessage),
 		step.RecoveryPolicy,
 		now,
 	)

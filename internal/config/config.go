@@ -6,14 +6,24 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/aimdotsh/dbops/internal/alert"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
+	Notifications    alert.NotificationConfig `yaml:"notifications"`
+	MetricsRetention struct {
+		Days5m int `yaml:"days_5m"`
+		Days1h int `yaml:"days_1h"`
+		Days1d int `yaml:"days_1d"`
+	} `yaml:"metrics_retention"`
 	Server struct {
-		Listen    string `yaml:"listen"`
-		PublicURL string `yaml:"public_url"`
-		DataDir   string `yaml:"data_dir"`
+		TLSCertFile string `yaml:"tls_cert_file"`
+		TLSKeyFile  string `yaml:"tls_key_file"`
+		AgentCAFile string `yaml:"agent_ca_file"`
+		Listen      string `yaml:"listen"`
+		PublicURL   string `yaml:"public_url"`
+		DataDir     string `yaml:"data_dir"`
 	} `yaml:"server"`
 
 	Storage struct {
@@ -72,6 +82,7 @@ type Config struct {
 	} `yaml:"mysql_install"`
 
 	AgentGateway struct {
+		RequireMTLS               bool   `yaml:"require_mtls"`
 		HeartbeatTimeoutSeconds   int    `yaml:"heartbeat_timeout_seconds"`
 		WebsocketPath             string `yaml:"websocket_path"`
 		BootstrapTokenEnv         string `yaml:"bootstrap_token_env"`
@@ -82,6 +93,9 @@ type Config struct {
 
 func Default() Config {
 	var c Config
+	c.MetricsRetention.Days5m = 30
+	c.MetricsRetention.Days1h = 180
+	c.MetricsRetention.Days1d = 730
 	c.Server.Listen = "0.0.0.0:8080"
 	c.Server.PublicURL = "http://127.0.0.1:8080"
 	c.Server.DataDir = "/data/dbops"
@@ -132,6 +146,23 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	if value := os.Getenv("DBOPS_PUBLIC_URL"); value != "" {
+		cfg.Server.PublicURL = value
+	}
+	if value := os.Getenv("DBOPS_LISTEN"); value != "" {
+		cfg.Server.Listen = value
+	}
+	if value := os.Getenv("DBOPS_DATA_DIR"); value != "" {
+		cfg.Server.DataDir = value
+	}
+	for key, value := range map[*string]string{&cfg.Storage.MetadataDB: "dbops.db", &cfg.Storage.MetricsDB: "metrics.db", &cfg.Storage.LogDir: "logs", &cfg.Storage.TaskWorkDir: "task-work", &cfg.Storage.PlatformBackupDir: "platform-backup", &cfg.Storage.SoftwareDir: "software"} {
+		if *key == "" || *key == filepath.Join("/data/dbops", value) {
+			*key = filepath.Join(cfg.Server.DataDir, value)
+		}
+	}
+	if cfg.MetricsRetention.Days5m <= 0 || cfg.MetricsRetention.Days1h <= 0 || cfg.MetricsRetention.Days1d <= 0 {
+		return cfg, errors.New("metrics retention days must be positive")
+	}
 	if cfg.Server.DataDir == "" {
 		return cfg, errors.New("server.data_dir is required")
 	}
@@ -154,6 +185,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.AgentGateway.BootstrapTokenEnv == "" {
 		cfg.AgentGateway.BootstrapTokenEnv = "DBOPS_AGENT_BOOTSTRAP_TOKEN"
+	}
+	if cfg.AgentGateway.RequireMTLS && (cfg.Server.TLSCertFile == "" || cfg.Server.TLSKeyFile == "" || cfg.Server.AgentCAFile == "") {
+		return cfg, errors.New("agent mTLS requires server TLS certificate, key and agent CA")
 	}
 	cfg.AgentGateway.BootstrapToken = os.Getenv(cfg.AgentGateway.BootstrapTokenEnv)
 	if cfg.AgentGateway.BootstrapToken == "" && !cfg.AgentGateway.AllowInsecureRegistration {

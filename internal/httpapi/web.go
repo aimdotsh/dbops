@@ -18,7 +18,6 @@ func registerWeb(r *gin.Engine) {
 		return
 	}
 	fileServer := http.FileServer(http.FS(root))
-	r.GET("/assets/*filepath", gin.WrapH(fileServer))
 
 	serveIndex := func(c *gin.Context) {
 		b, err := fs.ReadFile(root, "index.html")
@@ -29,6 +28,17 @@ func registerWeb(r *gin.Engine) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", b)
 	}
 	r.GET("/", serveIndex)
+	// /assets is both the SPA inventory route and the static bundle prefix.
+	// Serve the SPA for the exact route (including Gin's trailing-slash form),
+	// while preserving /assets/<file> for generated bundles.
+	r.GET("/assets", serveIndex)
+	r.GET("/assets/*filepath", func(c *gin.Context) {
+		if c.Param("filepath") == "/" {
+			serveIndex(c)
+			return
+		}
+		gin.WrapH(fileServer)(c)
+	})
 	r.NoRoute(func(c *gin.Context) {
 		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"code": "NOT_FOUND"})

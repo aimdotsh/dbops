@@ -10,6 +10,7 @@ type Scheduler struct {
 	logger   *slog.Logger
 	enabled  bool
 	interval time.Duration
+	jobs     []func(context.Context) error
 }
 
 func New(logger *slog.Logger, enabled bool, seconds int) *Scheduler {
@@ -31,8 +32,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.logger.Debug("scheduler tick")
+				for _, job := range s.jobs {
+					if err := job(ctx); err != nil {
+						s.logger.Error("scheduled maintenance failed", "error", err)
+					}
+				}
 			}
 		}
 	}()
 }
+
+func (s *Scheduler) Add(job func(context.Context) error) { s.jobs = append(s.jobs, job) }

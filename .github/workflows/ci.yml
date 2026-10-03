@@ -509,7 +509,7 @@ jobs:
               "batch_size": 1000,
               "txn_size": 1000,
               "sleep_ms": 10,
-              "max_replication_lag": 30,
+              "max_replication_lag": 0,  # standalone fake MySQL has no replica to monitor
               "delete_source": False,
               "pt_archiver_path": "/tmp/dbops-mysql-ci/base/bin/pt-archiver",
           }

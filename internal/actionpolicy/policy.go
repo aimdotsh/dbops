@@ -22,10 +22,17 @@ type Policy struct {
 }
 
 var policies = map[string]Policy{
+	"backup.transfer.export":  {Action: "backup.transfer.export", Risk: R1},
+	"backup.transfer.read":    {Action: "backup.transfer.read", Risk: R1},
+	"backup.transfer.write":   {Action: "backup.transfer.write", Risk: R1},
+	"backup.transfer.finish":  {Action: "backup.transfer.finish", Risk: R1},
+	"backup.transfer.cleanup": {Action: "backup.transfer.cleanup", Risk: R1},
+
 	"host.info":                   {Action: "host.info", Risk: R0},
 	"host.disk.list":              {Action: "host.disk.list", Risk: R0},
 	"host.port.check":             {Action: "host.port.check", Risk: R0},
 	"host.directory.check":        {Action: "host.directory.check", Risk: R0},
+	"mysql.metrics":               {Action: "mysql.metrics", Risk: R0},
 	"mysql.precheck":              {Action: "mysql.precheck", Risk: R0},
 	"mysql.install":               {Action: "mysql.install", Risk: R2},
 	"mysql.start":                 {Action: "mysql.start", Risk: R1},
@@ -35,7 +42,9 @@ var policies = map[string]Policy{
 	"mysql.replication.create":    {Action: "mysql.replication.create", Risk: R3, ConfirmationRequired: true},
 	"mysql.replication.status":    {Action: "mysql.replication.status", Risk: R0},
 	"mysql.backup":                {Action: "mysql.backup", Risk: R1},
+	"mysql.xtrabackup.backup":     {Action: "mysql.xtrabackup.backup", Risk: R1},
 	"mysql.restore":               {Action: "mysql.restore", Risk: R4, ConfirmationRequired: true},
+	"mysql.xtrabackup.restore":    {Action: "mysql.xtrabackup.restore", Risk: R4, ConfirmationRequired: true},
 	"mysql.archive.precheck":      {Action: "mysql.archive.precheck", Risk: R0},
 	"mysql.archive.start":         {Action: "mysql.archive.start", Risk: R3, ConfirmationRequired: true},
 	"mysql.archive.pause":         {Action: "mysql.archive.pause", Risk: R1},

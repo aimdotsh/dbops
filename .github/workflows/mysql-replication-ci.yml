@@ -127,6 +127,14 @@ jobs:
 
           if "-e" in args:
               q = args[args.index("-e") + 1]
+              if "@@GLOBAL.gtid_executed" in q:
+                  print("")
+                  sys.exit(0)
+              if "FROM information_schema.schemata" in q:
+                  sys.exit(0)
+              if "FROM information_schema.tables" in q:
+                  print("0")
+                  sys.exit(0)
               if "@@version" in q:
                   print("\t".join([
                       inst["version"], inst["server_uuid"], str(inst["server_id"]),

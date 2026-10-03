@@ -1,13 +1,18 @@
 services:
   dbops:
-    image: dbops/dbops-server:1.0.0
-    container_name: dbops
+    build:
+      context: ..
+    image: dbops-local:1.0.0
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
-      DBOPS_MASTER_KEY: ${DBOPS_MASTER_KEY}
+      DBOPS_MASTER_KEY: ${DBOPS_MASTER_KEY:?set a persistent master key}
+      DBOPS_JWT_SECRET: ${DBOPS_JWT_SECRET:?set at least 32 characters}
+      DBOPS_ADMIN_PASSWORD: ${DBOPS_ADMIN_PASSWORD:?set the initial admin password}
+      DBOPS_AGENT_BOOTSTRAP_TOKEN: ${DBOPS_AGENT_BOOTSTRAP_TOKEN:?set an agent enrollment secret}
+      DBOPS_PUBLIC_URL: ${DBOPS_PUBLIC_URL:-http://127.0.0.1:8080}
     volumes:
-      - /data/dbops:/data/dbops
-    # 可选：覆盖镜像内默认配置
-    # command: ["--config", "/data/dbops/config/server.yaml"]
+      - dbops-data:/data/dbops
+volumes:
+  dbops-data:

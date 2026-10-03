@@ -42,6 +42,7 @@ type DatabaseRepository interface {
 	CreateInstalled(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
 	CreateImported(context.Context, domain.DatabaseInstance) (domain.DatabaseInstance, error)
 	UpdateStatus(context.Context, int64, string) error
+	UpdateRole(context.Context, int64, string) error
 }
 
 type SoftwarePackageRepository interface {
@@ -100,6 +101,8 @@ type TaskRepository interface {
 	UpdateStatus(context.Context, int64, string, int, string, string) error
 	UpdateProgress(context.Context, int64, int) error
 	RecoverExpired(context.Context) (int64, error)
+	RenewLease(context.Context, int64, string, int) error
+	FinishOwned(context.Context, int64, string, string, string, string) error
 	AddEvent(context.Context, domain.TaskEvent) error
 	ListEvents(context.Context, int64) ([]domain.TaskEvent, error)
 	UpsertStep(context.Context, domain.TaskStep) error
