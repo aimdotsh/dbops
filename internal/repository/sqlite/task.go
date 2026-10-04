@@ -151,6 +151,16 @@ func (r TaskRepo) RecoverExpired(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// A server crash can leave the archive job running after its task lease is
+	// recovered. Keep the job for read-only reconciliation; the Agent process
+	// may still be alive, so this does not claim that archiving has stopped.
+	_, err = tx.ExecContext(ctx, `UPDATE archive_jobs SET status='interrupted',finished_at=?,
+ verification_status='needs_review',error_message=COALESCE(error_message,'archive task ended without a verified result; inspect data and process before retry')
+ WHERE status IN ('pending','running','pause_requested') AND task_id IN
+ (SELECT id FROM tasks WHERE status IN ('interrupted','cancelled','failed','timeout'))`, now)
+	if err != nil {
+		return 0, err
+	}
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}

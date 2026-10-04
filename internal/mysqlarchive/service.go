@@ -278,6 +278,15 @@ func (s *Service) RetryJob(ctx context.Context, jobID int64, confirmed bool) (do
 	if job.VerificationStatus != "ready_to_retry" {
 		return domain.Task{}, errors.New("reconcile the archive job before retrying")
 	}
+	if job.TaskID != nil {
+		task, taskErr := s.tasks.Get(ctx, *job.TaskID)
+		if taskErr != nil {
+			return domain.Task{}, taskErr
+		}
+		if task.Status == "interrupted" {
+			return domain.Task{}, errors.New("resolve the interrupted archive task before retrying")
+		}
+	}
 	report, err := s.ReconcileJob(ctx, jobID)
 	if err != nil {
 		return domain.Task{}, err

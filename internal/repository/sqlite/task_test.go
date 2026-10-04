@@ -46,6 +46,10 @@ CREATE TABLE tasks (
 CREATE TABLE backup_jobs (
  id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT, error_message TEXT
 );
+CREATE TABLE archive_jobs (
+ id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT,
+ verification_status TEXT, error_message TEXT
+);
 CREATE TABLE task_steps (
  id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, step_no INTEGER NOT NULL,
  step_code TEXT NOT NULL, step_name TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL,
