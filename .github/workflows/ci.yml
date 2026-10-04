@@ -563,13 +563,9 @@ jobs:
           if paused_job["status"] != "paused" or paused_job["archived_rows"] != 25:
               raise SystemExit(f"archive did not pause cleanly: {paused_job}")
 
-          resume_task = api_post(f"/mysql/archive/jobs/{slow_job['id']}/resume", {})
-          resume_final = wait_task(resume_task["id"])
-          if resume_final["status"] != "success":
-              raise SystemExit(f"archive resume failed: {resume_final}")
-          resumed_job = get_jobs(slow_policy["id"])[0]
-          if resumed_job["status"] != "success" or resumed_job["archived_rows"] != 100:
-              raise SystemExit(f"archive resume counters invalid: {resumed_job}")
+          resume_rejected = api_post(f"/mysql/archive/jobs/{slow_job['id']}/resume", {}, expect_error=True)
+          if resume_rejected.get("status") != 400:
+              raise SystemExit(f"source-retaining archive resume should require a durable cursor: {resume_rejected}")
 
           stop_policy_body = dict(slow_policy_body)
           stop_policy_body["name"] = "archive-stop"
@@ -606,7 +602,7 @@ jobs:
           open("/tmp/archive-policy-id", "w").write(str(policy["id"]))
           print("mysql.archive policy/job end-to-end OK", {
               "normal_job": normal_job["id"],
-              "pause_resume_job": slow_job["id"],
+              "paused_job": slow_job["id"],
               "stopped_job": stop_job["id"],
           })
           PY
