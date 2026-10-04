@@ -496,7 +496,7 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 			TaskID: t.ID, StepNo: 1, StepCode: "ARCHIVE_PRECHECK", StepName: "Archive precheck and dry-run",
 			Status: "success", Progress: 20, OutputJSON: security.RedactJSON(string(prePayload)), RecoveryPolicy: "verify_before_retry",
 		})
-		if job.BaselineJSON == "" {
+		if job.BaselineJSON == "" && p.DeleteSource {
 			baseline, inspectErr := s.inspect(ctx, p, source, dest, where, 0)
 			if inspectErr != nil {
 				_ = s.jobs.UpdateState(ctx, job.ID, "failed", 0, 0, 0, 0, 0, "", "", inspectErr.Error())
