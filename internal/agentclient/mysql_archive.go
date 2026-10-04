@@ -251,12 +251,12 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 		"source_database": sourceDB,
 		"source_table":    sourceTable,
 	} {
-		if !validSQLIdentifier(value) {
+		if !validArchiveIdentifier(value) {
 			return "", "", "", "", "", "", fmt.Errorf("invalid %s", name)
 		}
 	}
 	if destDB != "" || destTable != "" {
-		if !validSQLIdentifier(destDB) || !validSQLIdentifier(destTable) {
+		if !validArchiveIdentifier(destDB) || !validArchiveIdentifier(destTable) {
 			return "", "", "", "", "", "", errors.New("destination_database and destination_table must both be valid identifiers")
 		}
 	}
@@ -271,6 +271,19 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 		return "", "", "", "", "", "", errors.New("pt_archiver_path is not an executable file")
 	}
 	return sourceDB, sourceTable, destDB, destTable, where, toolPath, nil
+}
+
+func validArchiveIdentifier(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '$' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where string) []string {

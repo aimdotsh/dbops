@@ -55,6 +55,15 @@ func TestSafeArchiveWhere(t *testing.T) {
 	}
 }
 
+func TestArchiveIdentifierMatchesServerLimit(t *testing.T) {
+	if !validArchiveIdentifier("dbops_archive_validation_20261004_01") || !validArchiveIdentifier(strings.Repeat("a", 64)) {
+		t.Fatal("valid MySQL identifiers rejected")
+	}
+	if validArchiveIdentifier(strings.Repeat("a", 65)) || validArchiveIdentifier("bad-name") {
+		t.Fatal("invalid MySQL identifiers accepted")
+	}
+}
+
 func TestArchiveControlsUseReservedLane(t *testing.T) {
 	for _, action := range []string{"mysql.archive.pause", "mysql.archive.resume", "mysql.archive.stop"} {
 		if !isControlAction(action) {
