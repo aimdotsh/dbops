@@ -161,6 +161,8 @@ func New(
 	protected.GET("/mysql/archive/jobs", read, s.listMySQLArchiveJobs)
 	protected.POST("/mysql/archive/jobs/:id/pause", ops, s.pauseMySQLArchiveJob)
 	protected.POST("/mysql/archive/jobs/:id/resume", ops, s.resumeMySQLArchiveJob)
+	protected.POST("/mysql/archive/jobs/:id/reconcile", adminDBA, s.reconcileMySQLArchiveJob)
+	protected.POST("/mysql/archive/jobs/:id/retry", adminDBA, s.retryMySQLArchiveJob)
 	protected.POST("/mysql/archive/jobs/:id/stop", adminDBA, s.stopMySQLArchiveJob)
 
 	protected.GET("/mysql/replications", read, s.listMySQLReplications)

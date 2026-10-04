@@ -50,6 +50,17 @@ func Migrate(meta, metrics *sql.DB) error {
 	if err := ensureColumn(meta, "software_packages", "size_bytes", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	for _, column := range []string{"effective_where", "baseline_json", "verification_json"} {
+		if err := ensureColumn(meta, "archive_jobs", column, "TEXT"); err != nil {
+			return err
+		}
+	}
+	if err := ensureColumn(meta, "archive_jobs", "retry_of_job_id", "INTEGER REFERENCES archive_jobs(id)"); err != nil {
+		return err
+	}
+	if _, err := meta.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_jobs_retry_of ON archive_jobs(retry_of_job_id) WHERE retry_of_job_id IS NOT NULL"); err != nil {
+		return err
+	}
 	if _, err := metrics.Exec(metricsSchema); err != nil {
 		return err
 	}

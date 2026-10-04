@@ -236,8 +236,10 @@ CREATE TABLE IF NOT EXISTS archive_jobs (
   scanned_rows INTEGER NOT NULL DEFAULT 0, archived_rows INTEGER NOT NULL DEFAULT 0,
   deleted_rows INTEGER NOT NULL DEFAULT 0, failed_rows INTEGER NOT NULL DEFAULT 0,
   speed_rows_sec INTEGER, last_processed_key TEXT, pause_reason TEXT,
-  verification_status TEXT, error_message TEXT
+  verification_status TEXT, effective_where TEXT, baseline_json TEXT,
+  verification_json TEXT, retry_of_job_id INTEGER REFERENCES archive_jobs(id), error_message TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_jobs_retry_of ON archive_jobs(retry_of_job_id) WHERE retry_of_job_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS alert_rules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

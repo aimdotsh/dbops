@@ -102,6 +102,34 @@ func (s *Server) resumeMySQLArchiveJob(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
 }
 
+func (s *Server) reconcileMySQLArchiveJob(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	report, err := s.mysqlArchive.ReconcileJob(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_RECONCILE_FAILED", "message": err.Error()})
+		return
+	}
+	ok(c, report)
+}
+
+func (s *Server) retryMySQLArchiveJob(c *gin.Context) {
+	id, okID := parseID(c)
+	if !okID {
+		return
+	}
+	var body archiveStartRequest
+	_ = c.ShouldBindJSON(&body)
+	task, err := s.mysqlArchive.RetryJob(c.Request.Context(), id, body.Confirmed)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "MYSQL_ARCHIVE_RETRY_REJECTED", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"code": "OK", "message": "accepted", "data": task})
+}
+
 func (s *Server) controlMySQLArchiveJob(c *gin.Context, action string) {
 	id, okID := parseID(c)
 	if !okID {

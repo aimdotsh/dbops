@@ -82,6 +82,8 @@ type ArchiveJobRepository interface {
 	List(context.Context, int64) ([]domain.ArchiveJob, error)
 	AttachTask(context.Context, int64, int64) error
 	UpdateState(context.Context, int64, string, int64, int64, int64, int64, int64, string, string, string) error
+	SetBaseline(context.Context, int64, string, string) error
+	RecordReconciliation(context.Context, int64, string, string, int64, int64) error
 }
 
 type BackupJobRepository interface {

@@ -202,6 +202,10 @@ type ArchiveJob struct {
 	LastProcessedKey   string     `json:"last_processed_key,omitempty"`
 	PauseReason        string     `json:"pause_reason,omitempty"`
 	VerificationStatus string     `json:"verification_status,omitempty"`
+	EffectiveWhere     string     `json:"effective_where,omitempty"`
+	BaselineJSON       string     `json:"baseline_json,omitempty"`
+	VerificationJSON   string     `json:"verification_json,omitempty"`
+	RetryOfJobID       *int64     `json:"retry_of_job_id,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
 }
 

@@ -51,3 +51,43 @@ func TestMaterializeWhereUsesUTC(t *testing.T) {
 		t.Fatalf("expected UTC cutoff date %s in %s", yesterday, got)
 	}
 }
+
+func TestCompareArchiveInspections(t *testing.T) {
+	baseline := archiveInspection{SourceMatching: 100, DestinationMatching: 10, Bounded: true, Overlap: 0, UnionKeyDigest: "same", ProcessCheckOK: true}
+	current := archiveInspection{SourceMatching: 60, DestinationMatching: 50, Bounded: true, Overlap: 0, UnionKeyDigest: "same", ProcessCheckOK: true}
+	got := compareArchiveInspections(baseline, current, true)
+	if !got.SafeToRetry || got.MovedRows != 40 {
+		t.Fatalf("expected 40-row safe retry, got %+v", got)
+	}
+	if archiveResultVerified(got, "success") || !archiveResultVerified(got, "paused") {
+		t.Fatal("a successful archive must have processed all matching source rows")
+	}
+	cases := []struct {
+		name   string
+		change func(*archiveInspection)
+	}{
+		{"overlap", func(v *archiveInspection) { v.Overlap = 1 }},
+		{"missing key", func(v *archiveInspection) { v.UnionKeyDigest = "different" }},
+		{"count drift", func(v *archiveInspection) { v.DestinationMatching = 49 }},
+		{"process active", func(v *archiveInspection) { v.ProcessRunning = true }},
+		{"process unknown", func(v *archiveInspection) { v.ProcessCheckOK = false }},
+		{"unbounded", func(v *archiveInspection) { v.Bounded = false }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := current
+			tc.change(&v)
+			if result := compareArchiveInspections(baseline, v, true); result.SafeToRetry {
+				t.Fatalf("unsafe retry allowed: %+v", result)
+			}
+		})
+	}
+	if result := compareArchiveInspections(baseline, current, false); result.SafeToRetry {
+		t.Fatal("source-retaining retry allowed")
+	}
+	current.SourceMatching = 0
+	current.DestinationMatching = 110
+	if result := compareArchiveInspections(baseline, current, true); !result.Completed || result.SafeToRetry || result.MovedRows != 100 || !archiveResultVerified(result, "success") {
+		t.Fatalf("expected completed reconciliation: %+v", result)
+	}
+}
