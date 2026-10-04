@@ -533,7 +533,12 @@ jobs:
               raise SystemExit(f"archive job registration failed: {archive_jobs}")
           if archive_jobs[0]["archived_rows"] != 100 or archive_jobs[0]["deleted_rows"] != 0:
               raise SystemExit(f"archive row counters invalid: {archive_jobs[0]}")
+          if archive_jobs[0]["verification_status"] != "command_completed":
+              raise SystemExit(f"source-retaining archive must not claim data verification: {archive_jobs[0]}")
           normal_job = archive_jobs[0]
+          rerun_rejected = api_post(f"/mysql/archive/policies/{policy['id']}/start", {"confirmed": True}, expect_error=True)
+          if rerun_rejected.get("status") != 400:
+              raise SystemExit(f"source-retaining archive rerun should require a new verified policy: {rerun_rejected}")
 
           slow_policy_body = dict(policy_body)
           slow_policy_body["name"] = "archive-pause-resume"

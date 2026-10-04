@@ -182,6 +182,9 @@ func (s *Service) Start(ctx context.Context, policyID int64, confirmed bool) (do
 		if previous[0].Status == "pending" || previous[0].Status == "running" || previous[0].Status == "pause_requested" {
 			return domain.Task{}, errors.New("an archive job for this policy is already active")
 		}
+		if !p.DeleteSource {
+			return domain.Task{}, errors.New("source-retaining archive cannot rerun without a durable cursor; verify destination data before creating a new policy")
+		}
 		if previous[0].BaselineJSON != "" && (previous[0].Status == "failed" || previous[0].Status == "interrupted") {
 			return domain.Task{}, errors.New("previous archive job needs reconciliation; use the verified retry action")
 		}

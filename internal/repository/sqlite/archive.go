@@ -166,7 +166,7 @@ WHERE id=?`,
 
 func verificationStatus(status string) string {
 	if status == "success" {
-		return "verified"
+		return "command_completed"
 	}
 	if status == "failed" {
 		return "needs_review"
