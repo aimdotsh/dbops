@@ -2,11 +2,11 @@ package agentclient
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"runtime"
@@ -62,6 +62,8 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 func (c *Client) runOnce(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	wsURL, err := websocketURL(c.cfg.Server.URL)
 	if err != nil {
 		return err
@@ -71,25 +73,26 @@ func (c *Client) runOnce(ctx context.Context) error {
 		return err
 	}
 
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-		TLSClientConfig: &tls.Config{
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: !c.cfg.Security.VerifyServerTLS, //nolint:gosec
-		},
+	tlsConfig, err := clientTLSConfig(c.cfg)
+	if err != nil {
+		return err
 	}
+	c.executor.httpClient.Store(&http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}, Timeout: 30 * time.Minute})
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, TLSClientConfig: tlsConfig}
+
 	conn, _, err := dialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
+	go func() { <-ctx.Done(); _ = conn.Close() }()
 
 	hostname, _ := os.Hostname()
 	hello := agentproto.Hello{
 		AgentUUID:       c.agentID,
 		Version:         Version,
 		Hostname:        hostname,
-		IPAddress:       primaryIP(),
+		IPAddress:       c.advertiseIP(),
 		Architecture:    runtime.GOARCH,
 		ProtocolVersion: agentproto.ProtocolVersion,
 		Auth: agentproto.Auth{
@@ -281,15 +284,15 @@ func websocketURL(server string) (string, error) {
 }
 
 func primaryIP() string {
-	conn, err := net.DialTimeout("udp", "8.8.8.8:80", time.Second)
-	if err != nil {
-		return ""
+	addrs, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, addr := range addrs {
+			if network, ok := addr.(*net.IPNet); ok && !network.IP.IsLoopback() && network.IP.To4() != nil {
+				return network.IP.String()
+			}
+		}
 	}
-	defer conn.Close()
-	if addr, ok := conn.LocalAddr().(*net.UDPAddr); ok {
-		return addr.IP.String()
-	}
-	return ""
+	return "127.0.0.1"
 }
 
 func isControlAction(action string) bool {
@@ -299,4 +302,11 @@ func isControlAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func (c *Client) advertiseIP() string {
+	if c.cfg.Agent.AdvertiseIP != "" {
+		return c.cfg.Agent.AdvertiseIP
+	}
+	return primaryIP()
 }

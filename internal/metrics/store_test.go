@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -42,5 +43,27 @@ CREATE TABLE metric_rollups_1d(resource_type TEXT,resource_id INTEGER,bucket_ts 
 	}
 	if len(items) != 1 {
 		t.Fatalf("expected one range item, got %d", len(items))
+	}
+}
+
+func TestAggregateGauges(t *testing.T) {
+	one, err := aggregatePayload("", map[string]any{"cpu": float64(10)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := aggregatePayload(one, map[string]any{"cpu": float64(30)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal([]byte(two), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["cpu"] != float64(20) {
+		t.Fatalf("not averaged: %v", got)
+	}
+	stats := got["_aggregation"].(map[string]any)["cpu"].(map[string]any)
+	if stats["min"] != float64(10) || stats["max"] != float64(30) || stats["count"] != float64(2) {
+		t.Fatalf("bad stats: %v", stats)
 	}
 }

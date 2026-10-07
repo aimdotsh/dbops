@@ -12,21 +12,6 @@ func TestTaskStepAndEvent(t *testing.T) {
 	defer db.Close()
 
 	if _, err := db.Exec(`
-CREATE TABLE task_steps (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id INTEGER NOT NULL,
-  step_no INTEGER NOT NULL,
-  step_code TEXT NOT NULL,
-  step_name TEXT,
-  status TEXT NOT NULL,
-  progress INTEGER NOT NULL,
-  started_at TEXT,
-  finished_at TEXT,
-  output_json TEXT,
-  error_message TEXT,
-  recovery_policy TEXT,
-  UNIQUE(task_id,step_no)
-);
 CREATE TABLE task_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id INTEGER NOT NULL,

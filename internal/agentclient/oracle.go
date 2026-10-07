@@ -34,16 +34,29 @@ FROM v$instance i CROSS JOIN v$database d;`)
 func oracleTablespaceList(ctx context.Context, workDir string, params map[string]any) ([]map[string]any, error) {
 	out, err := runOracleSQL(ctx, workDir, params, `
 SELECT t.tablespace_name||'|'||t.status||'|'||t.contents||'|'||
-       NVL(df.bytes,0)||'|'||NVL(fs.free_bytes,0)||'|'||NVL(df.maxbytes,0)
+       NVL(df.bytes,NVL(tf.bytes,0))||'|'||
+       CASE WHEN t.contents='TEMPORARY' THEN
+         GREATEST(NVL(tf.bytes,0)-NVL(tu.used_bytes,0),0)
+       ELSE NVL(fs.free_bytes,0) END||'|'||
+       NVL(df.maxbytes,NVL(tf.maxbytes,0))
 FROM dba_tablespaces t
 LEFT JOIN (
   SELECT tablespace_name,SUM(bytes) bytes,SUM(CASE WHEN maxbytes=0 THEN bytes ELSE maxbytes END) maxbytes
   FROM dba_data_files GROUP BY tablespace_name
 ) df ON df.tablespace_name=t.tablespace_name
 LEFT JOIN (
+  SELECT tablespace_name,SUM(bytes) bytes,SUM(CASE WHEN maxbytes=0 THEN bytes ELSE maxbytes END) maxbytes
+  FROM dba_temp_files GROUP BY tablespace_name
+) tf ON tf.tablespace_name=t.tablespace_name
+LEFT JOIN (
   SELECT tablespace_name,SUM(bytes) free_bytes
   FROM dba_free_space GROUP BY tablespace_name
 ) fs ON fs.tablespace_name=t.tablespace_name
+LEFT JOIN (
+  SELECT u.tablespace tablespace_name,SUM(u.blocks*ts.block_size) used_bytes
+  FROM v$tempseg_usage u JOIN dba_tablespaces ts ON ts.tablespace_name=u.tablespace
+  GROUP BY u.tablespace
+) tu ON tu.tablespace_name=t.tablespace_name
 ORDER BY t.tablespace_name;`)
 	if err != nil {
 		return nil, err

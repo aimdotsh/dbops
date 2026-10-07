@@ -287,6 +287,10 @@ CREATE TABLE IF NOT EXISTS archive_jobs (
   last_processed_key TEXT,
   pause_reason TEXT,
   verification_status TEXT,
+  effective_where TEXT,
+  baseline_json TEXT,
+  verification_json TEXT,
+  retry_of_job_id INTEGER REFERENCES archive_jobs(id),
   error_message TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_archive_jobs_policy_status ON archive_jobs(policy_id,status);

@@ -3,13 +3,15 @@ package domain
 import "time"
 
 type Host struct {
-	ID          int64     `json:"id"`
-	Hostname    string    `json:"hostname"`
-	IPAddress   string    `json:"ip_address"`
-	Status      string    `json:"status"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ProjectID     *int64    `json:"project_id,omitempty"`
+	EnvironmentID *int64    `json:"environment_id,omitempty"`
+	ID            int64     `json:"id"`
+	Hostname      string    `json:"hostname"`
+	IPAddress     string    `json:"ip_address"`
+	Status        string    `json:"status"`
+	Description   string    `json:"description,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type Agent struct {
@@ -200,6 +202,10 @@ type ArchiveJob struct {
 	LastProcessedKey   string     `json:"last_processed_key,omitempty"`
 	PauseReason        string     `json:"pause_reason,omitempty"`
 	VerificationStatus string     `json:"verification_status,omitempty"`
+	EffectiveWhere     string     `json:"effective_where,omitempty"`
+	BaselineJSON       string     `json:"baseline_json,omitempty"`
+	VerificationJSON   string     `json:"verification_json,omitempty"`
+	RetryOfJobID       *int64     `json:"retry_of_job_id,omitempty"`
 	ErrorMessage       string     `json:"error_message,omitempty"`
 }
 

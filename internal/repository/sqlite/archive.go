@@ -19,9 +19,6 @@ func (r ArchivePolicyRepo) Create(ctx context.Context, p domain.ArchivePolicy) (
 	if p.SleepMS < 0 {
 		p.SleepMS = 0
 	}
-	if p.MaxReplicationLag <= 0 {
-		p.MaxReplicationLag = 30
-	}
 	if p.OptionsJSON == "" {
 		p.OptionsJSON = "{}"
 	}
@@ -89,8 +86,8 @@ func scanArchivePolicy(s scanner) (domain.ArchivePolicy, error) {
 
 func (r ArchiveJobRepo) Create(ctx context.Context, j domain.ArchiveJob) (domain.ArchiveJob, error) {
 	res, err := r.DB.ExecContext(ctx,
-		"INSERT INTO archive_jobs(task_id,policy_id,status) VALUES(?,?,?)",
-		j.TaskID, j.PolicyID, "pending")
+		"INSERT INTO archive_jobs(task_id,policy_id,status,effective_where,retry_of_job_id) VALUES(?,?,?,?,?)",
+		j.TaskID, j.PolicyID, "pending", nullString(j.EffectiveWhere), j.RetryOfJobID)
 	if err != nil {
 		return j, err
 	}
@@ -131,6 +128,16 @@ func (r ArchiveJobRepo) AttachTask(ctx context.Context, id, taskID int64) error 
 	return err
 }
 
+func (r ArchiveJobRepo) SetBaseline(ctx context.Context, id int64, effectiveWhere, baselineJSON string) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE archive_jobs SET effective_where=?,baseline_json=?,verification_status='baseline_captured',verification_json=NULL WHERE id=? AND status IN ('pending','running')`, effectiveWhere, baselineJSON, id)
+	return err
+}
+
+func (r ArchiveJobRepo) RecordReconciliation(ctx context.Context, id int64, status, reportJSON string, archived, deleted int64) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE archive_jobs SET verification_status=?,verification_json=?,archived_rows=?,deleted_rows=? WHERE id=?`, status, reportJSON, archived, deleted, id)
+	return err
+}
+
 func (r ArchiveJobRepo) UpdateState(
 	ctx context.Context, id int64, status string,
 	scanned, archived, deleted, failed, speed int64,
@@ -159,34 +166,39 @@ WHERE id=?`,
 
 func verificationStatus(status string) string {
 	if status == "success" {
-		return "verified"
+		return "command_completed"
 	}
 	if status == "failed" {
-		return "failed"
+		return "needs_review"
 	}
 	return ""
 }
 
 const archiveJobSelect = `SELECT id,task_id,policy_id,status,started_at,finished_at,scanned_rows,archived_rows,deleted_rows,
 failed_rows,COALESCE(speed_rows_sec,0),COALESCE(last_processed_key,''),COALESCE(pause_reason,''),
-COALESCE(verification_status,''),COALESCE(error_message,'')
+COALESCE(verification_status,''),COALESCE(effective_where,''),COALESCE(baseline_json,''),COALESCE(verification_json,''),retry_of_job_id,COALESCE(error_message,'')
 FROM archive_jobs`
 
 func scanArchiveJob(s scanner) (domain.ArchiveJob, error) {
 	var j domain.ArchiveJob
 	var taskID sql.NullInt64
+	var retryOf sql.NullInt64
 	var started, finished sql.NullString
 	if err := s.Scan(
 		&j.ID, &taskID, &j.PolicyID, &j.Status, &started, &finished,
 		&j.ScannedRows, &j.ArchivedRows, &j.DeletedRows, &j.FailedRows,
 		&j.SpeedRowsSec, &j.LastProcessedKey, &j.PauseReason,
-		&j.VerificationStatus, &j.ErrorMessage,
+		&j.VerificationStatus, &j.EffectiveWhere, &j.BaselineJSON, &j.VerificationJSON, &retryOf, &j.ErrorMessage,
 	); err != nil {
 		return j, err
 	}
 	if taskID.Valid {
 		v := taskID.Int64
 		j.TaskID = &v
+	}
+	if retryOf.Valid {
+		v := retryOf.Int64
+		j.RetryOfJobID = &v
 	}
 	if started.Valid {
 		v, _ := time.Parse(time.RFC3339, started.String)

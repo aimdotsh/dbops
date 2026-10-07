@@ -29,25 +29,100 @@ func mysqlReplicationPrecheck(ctx context.Context, params map[string]any) (map[s
 	serverID, _ := strconv.ParseInt(fields[2], 10, 64)
 	logBin := fields[4] == "1" || strings.EqualFold(fields[4], "ON")
 	ok := strings.EqualFold(fields[3], "ON") && logBin && strings.EqualFold(fields[5], "ROW") && serverID > 0
+	gtid, err := runMySQLQuery(ctx, baseDir, runDir, password, "SELECT @@GLOBAL.gtid_executed;", false)
+	if err != nil {
+		return nil, err
+	}
+	dbOut, err := runMySQLQuery(ctx, baseDir, runDir, password, "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql','sys','performance_schema','information_schema') ORDER BY schema_name;", false)
+	if err != nil {
+		return nil, err
+	}
+	databases := nonEmptyLines(dbOut)
+	engineOut, err := runMySQLQuery(ctx, baseDir, runDir, password, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema NOT IN ('mysql','sys','performance_schema','information_schema') AND table_type='BASE TABLE' AND engine <> 'InnoDB';", false)
+	if err != nil {
+		return nil, err
+	}
+	nonInnoDB, err := strconv.ParseInt(strings.TrimSpace(engineOut), 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	status, err := mysqlReplicationStatus(ctx, params)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
-		"ok":              ok,
-		"version":         fields[0],
-		"server_uuid":     fields[1],
-		"server_id":       serverID,
-		"gtid_mode":       fields[3],
-		"log_bin":         logBin,
-		"binlog_format":   fields[5],
-		"read_only":       fields[6],
-		"super_read_only": fields[7],
+		"ok":                     ok,
+		"version":                fields[0],
+		"server_uuid":            fields[1],
+		"server_id":              serverID,
+		"gtid_mode":              fields[3],
+		"log_bin":                logBin,
+		"binlog_format":          fields[5],
+		"read_only":              fields[6],
+		"super_read_only":        fields[7],
+		"gtid_executed":          strings.TrimSpace(gtid),
+		"user_databases":         databases,
+		"non_innodb_tables":      nonInnoDB,
+		"replication_configured": status["configured"],
 	}, nil
 }
 
-func mysqlReplicationCreate(ctx context.Context, params map[string]any) (map[string]any, error) {
+func mysqlReplicationCreate(ctx context.Context, workDir string, params map[string]any) (map[string]any, error) {
 	baseDir, runDir, rootPassword, err := mysqlRuntimeParams(params)
 	if err != nil {
 		return nil, err
 	}
 	mode, _ := params["mode"].(string)
+	if mode == "baseline_export" {
+		id, _ := params["baseline_id"].(string)
+		if !transferIDPattern.MatchString(id) {
+			return nil, errors.New("invalid baseline id")
+		}
+		check, err := mysqlReplicationPrecheck(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+		if !check["ok"].(bool) || check["non_innodb_tables"].(int64) != 0 {
+			return nil, errors.New("source must use GTID and InnoDB tables for automatic baseline")
+		}
+		dbs, _ := check["user_databases"].([]string)
+		if len(dbs) == 0 {
+			return nil, errors.New("source has no user databases to seed")
+		}
+		for _, db := range dbs {
+			if !validDatabaseName(db) {
+				return nil, fmt.Errorf("unsupported database name %q", db)
+			}
+		}
+		root := filepath.Join(workDir, "replication-baselines", id)
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return nil, err
+		}
+		result, err := mysqlBackup(ctx, workDir, map[string]any{
+			"base_dir": baseDir, "run_dir": runDir, "root_password": rootPassword,
+			"output_dir": root, "file_name": "baseline.sql.gz", "databases": dbs, "replication_baseline": true,
+		})
+		if err != nil {
+			_ = os.RemoveAll(root)
+			return nil, err
+		}
+		result["databases"] = dbs
+		return result, nil
+	}
+	if mode == "baseline_import" {
+		result, err := mysqlRestore(ctx, workDir, map[string]any{
+			"base_dir": baseDir, "run_dir": runDir, "root_password": rootPassword,
+			"backup_path": params["backup_path"], "sha256": params["sha256"], "replication_baseline": true,
+		})
+		return result, err
+	}
+	if mode == "baseline_cleanup" {
+		id, _ := params["baseline_id"].(string)
+		if !transferIDPattern.MatchString(id) {
+			return nil, errors.New("invalid baseline id")
+		}
+		return map[string]any{"cleaned": true}, os.RemoveAll(filepath.Join(workDir, "replication-baselines", id))
+	}
 	replUser, _ := params["replication_user"].(string)
 	replPassword, _ := params["replication_password"].(string)
 	if !validSQLIdentifier(replUser) || replPassword == "" || !safeSQLSecret(replPassword) {
@@ -76,7 +151,7 @@ func mysqlReplicationCreate(ctx context.Context, params map[string]any) (map[str
 			return nil, errors.New("invalid source host or port")
 		}
 		sqlText := fmt.Sprintf(
-			"STOP REPLICA; RESET REPLICA ALL; CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_PORT=%d, SOURCE_USER='%s', SOURCE_PASSWORD='%s', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA;",
+			"STOP REPLICA; RESET REPLICA ALL; CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_PORT=%d, SOURCE_USER='%s', SOURCE_PASSWORD='%s', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA; SET PERSIST super_read_only=ON;",
 			sourceHost, sourcePort, replUser, replPassword,
 		)
 		if _, err := runMySQLQuery(ctx, baseDir, runDir, rootPassword, sqlText, true); err != nil {
@@ -109,9 +184,12 @@ func mysqlReplicationStatus(ctx context.Context, params map[string]any) (map[str
 	if len(values) == 0 {
 		return map[string]any{"configured": false, "status": "not_configured"}, nil
 	}
-	lag := int64(0)
+	var lag any
 	if v := values["Seconds_Behind_Source"]; v != "" && !strings.EqualFold(v, "NULL") {
-		lag, _ = strconv.ParseInt(v, 10, 64)
+		parsed, parseErr := strconv.ParseInt(v, 10, 64)
+		if parseErr == nil {
+			lag = parsed
+		}
 	}
 	ioRunning := values["Replica_IO_Running"]
 	sqlRunning := values["Replica_SQL_Running"]
@@ -151,12 +229,15 @@ func runMySQLQuery(ctx context.Context, baseDir, runDir, password, query string,
 	}
 	defer os.RemoveAll(work)
 	cfg := filepath.Join(work, "client.cnf")
-	content := "[client]\nuser=root\npassword=" + password + "\nsocket=" + runDir + "/mysql.sock\n"
+	content := "[client]\nuser=root\npassword=" + mysqlOption(password) + "\nsocket=" + runDir + "/mysql.sock\n"
 	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		return "", err
 	}
 	mysqlBin := filepath.Join(baseDir, "bin", "mysql")
 	args := []string{"--defaults-extra-file=" + cfg, "--batch", "--skip-column-names"}
+	if strings.Contains(query, "SHOW REPLICA STATUS") {
+		args = []string{"--defaults-extra-file=" + cfg, "--batch", "--vertical"}
+	}
 	cmd := exec.CommandContext(ctx, mysqlBin, args...)
 	if stdinMode {
 		cmd.Stdin = strings.NewReader(query + "\n")

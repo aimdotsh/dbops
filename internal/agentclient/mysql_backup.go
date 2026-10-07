@@ -49,8 +49,7 @@ func mysqlBackup(ctx context.Context, workDir string, params map[string]any) (ma
 		secretFile.Close()
 		return nil, err
 	}
-	escaped := strings.ReplaceAll(password, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, "\n", "")
+	escaped := mysqlOption(password)
 	if _, err := fmt.Fprintf(secretFile, "[client]\nuser=root\npassword=%s\nsocket=%s/mysql.sock\n", escaped, runDir); err != nil {
 		secretFile.Close()
 		return nil, err
@@ -88,6 +87,10 @@ func mysqlBackup(ctx context.Context, workDir string, params map[string]any) (ma
 	multi := io.MultiWriter(outFile, hash)
 	gz := gzip.NewWriter(multi)
 
+	gtidPurged := "OFF"
+	if baseline, _ := params["replication_baseline"].(bool); baseline {
+		gtidPurged = "ON"
+	}
 	args := []string{
 		"--defaults-extra-file=" + secretPath,
 		"--single-transaction",
@@ -95,7 +98,7 @@ func mysqlBackup(ctx context.Context, workDir string, params map[string]any) (ma
 		"--events",
 		"--triggers",
 		"--hex-blob",
-		"--set-gtid-purged=OFF",
+		"--set-gtid-purged=" + gtidPurged,
 	}
 	if all, _ := params["all_databases"].(bool); all {
 		args = append(args, "--all-databases")

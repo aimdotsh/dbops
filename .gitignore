@@ -1,6 +1,16 @@
-dbops-server
+/dbops-server
 *.db
 *.db-shm
 *.db-wal
 coverage.out
 .DS_Store
+
+/dbops-agent
+web/node_modules/
+web/*.tsbuildinfo
+internal/httpapi/web/dist/assets/
+
+.local-test/
+
+/dbops-restore
+.local-data/

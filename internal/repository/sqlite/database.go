@@ -87,3 +87,9 @@ func (r DatabaseRepo) UpdateStatus(ctx context.Context, id int64, status string)
 		status, time.Now().UTC().Format(time.RFC3339), id)
 	return err
 }
+
+func (r DatabaseRepo) UpdateRole(ctx context.Context, id int64, role string) error {
+	_, err := r.DB.ExecContext(ctx, "UPDATE database_instances SET role=?,updated_at=? WHERE id=?",
+		role, time.Now().UTC().Format(time.RFC3339), id)
+	return err
+}

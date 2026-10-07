@@ -45,6 +45,7 @@ VALUES(?,?,?,?)
 ON CONFLICT(resource_type,resource_id) DO UPDATE SET
   collected_at=excluded.collected_at,
   payload_json=excluded.payload_json
+WHERE excluded.collected_at >= metric_latest.collected_at
 `, resourceType, resourceID, ts, string(raw)); err != nil {
 		return err
 	}
@@ -54,9 +55,17 @@ ON CONFLICT(resource_type,resource_id) DO UPDATE SET
 		"metric_rollups_1h":   collectedAt.Truncate(time.Hour),
 		"metric_rollups_1d":   time.Date(collectedAt.Year(), collectedAt.Month(), collectedAt.Day(), 0, 0, 0, 0, time.UTC),
 	} {
+		var previous string
+		if err := tx.QueryRowContext(ctx, "SELECT payload_json FROM "+table+" WHERE resource_type=? AND resource_id=? AND bucket_ts=?", resourceType, resourceID, bucket.Format(time.RFC3339)).Scan(&previous); err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		aggregate, err := aggregatePayload(previous, payload)
+		if err != nil {
+			return err
+		}
 		query := "INSERT INTO " + table + "(resource_type,resource_id,bucket_ts,payload_json) VALUES(?,?,?,?) " +
 			"ON CONFLICT(resource_type,resource_id,bucket_ts) DO UPDATE SET payload_json=excluded.payload_json"
-		if _, err := tx.ExecContext(ctx, query, resourceType, resourceID, bucket.Format(time.RFC3339), string(raw)); err != nil {
+		if _, err := tx.ExecContext(ctx, query, resourceType, resourceID, bucket.Format(time.RFC3339), aggregate); err != nil {
 			return err
 		}
 	}
@@ -138,4 +147,67 @@ func (s *Store) ListLatest(ctx context.Context, resourceType string) ([]Snapshot
 		out = append(out, snap)
 	}
 	return out, rows.Err()
+}
+
+// Numeric gauges retain mean/min/max/count instead of silently replacing history
+// with the final heartbeat. Non-numeric values retain the latest observed value.
+func aggregatePayload(previous string, payload map[string]any) (string, error) {
+	out := map[string]any{}
+	if previous != "" {
+		if err := json.Unmarshal([]byte(previous), &out); err != nil {
+			return "", err
+		}
+	}
+	stats, _ := out["_aggregation"].(map[string]any)
+	if stats == nil {
+		stats = map[string]any{}
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	normalized := map[string]any{}
+	if err = json.Unmarshal(raw, &normalized); err != nil {
+		return "", err
+	}
+	for key, value := range normalized {
+		if key == "_aggregation" {
+			continue
+		}
+		n, numeric := value.(float64)
+		if !numeric {
+			out[key] = value
+			continue
+		}
+		stat, _ := stats[key].(map[string]any)
+		if stat == nil {
+			stat = map[string]any{"sum": float64(0), "count": float64(0), "min": n, "max": n}
+		}
+		stat["sum"] = stat["sum"].(float64) + n
+		stat["count"] = stat["count"].(float64) + 1
+		if n < stat["min"].(float64) {
+			stat["min"] = n
+		}
+		if n > stat["max"].(float64) {
+			stat["max"] = n
+		}
+		stats[key] = stat
+		out[key] = stat["sum"].(float64) / stat["count"].(float64)
+	}
+	out["_aggregation"] = stats
+	b, err := json.Marshal(out)
+	return string(b), err
+}
+
+func (s *Store) Retain(ctx context.Context, now time.Time, days5m, days1h, days1d int) error {
+	for table, days := range map[string]int{"metric_snapshots_5m": days5m, "metric_rollups_1h": days1h, "metric_rollups_1d": days1d} {
+		if days <= 0 {
+			return errors.New("metric retention must be positive")
+		}
+		if _, err := s.DB.ExecContext(ctx, "DELETE FROM "+table+" WHERE bucket_ts < ?", now.UTC().AddDate(0, 0, -days).Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	_, err := s.DB.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)")
+	return err
 }

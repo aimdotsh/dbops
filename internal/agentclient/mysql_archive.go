@@ -74,7 +74,7 @@ func mysqlArchivePrecheck(ctx context.Context, workDir string, params map[string
 }
 
 func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]any) (map[string]any, error) {
-	_, runDir, password, err := mysqlRuntimeParams(params)
+	baseDir, runDir, password, err := mysqlRuntimeParams(params)
 	if err != nil {
 		return nil, err
 	}
@@ -127,26 +127,46 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 	_ = os.Remove(sentinel)
 
 	args := archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where)
+	// pt-archiver 3.2 accepts integer seconds for --sleep. Round a positive
+	// millisecond request upward so throttling never becomes weaker.
+	sleepSeconds := (sleepMS + 999) / 1000
 	args = append(args,
 		"--limit", strconv.Itoa(limit),
 		"--txn-size", strconv.Itoa(txnSize),
-		"--sleep", fmt.Sprintf("%.3f", float64(sleepMS)/1000.0),
+		"--sleep", strconv.Itoa(sleepSeconds),
 		"--statistics",
 		"--progress", strconv.Itoa(limit),
 		"--sentinel", sentinel,
 	)
-	if maxLag, err := intParamDefault(params, "max_replication_lag", 0); err == nil && maxLag > 0 {
-		args = append(args, "--max-lag", strconv.Itoa(maxLag))
+	maxThreads, err := intParamDefault(params, "max_threads_running", 0)
+	if err != nil || maxThreads < 0 {
+		return nil, errors.New("invalid max_threads_running")
 	}
 	if !deleteSource {
 		args = append(args, "--no-delete")
 	}
 
 	var out bytes.Buffer
-	cmd := exec.CommandContext(ctx, toolPath, args...)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	loadFailures := make(chan error, 1)
+	if maxThreads > 0 {
+		if err := checkArchiveThreads(ctx, baseDir, runDir, password, maxThreads); err != nil {
+			return nil, err
+		}
+		go watchArchiveThreads(runCtx, cancel, baseDir, runDir, password, maxThreads, loadFailures)
+	}
+	cmd := exec.CommandContext(runCtx, toolPath, args...)
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	cancel()
+	select {
+	case loadErr := <-loadFailures:
+		return nil, loadErr
+	default:
+	}
+	if err != nil {
 		return nil, fmt.Errorf("pt-archiver failed: %w: %s", err, trimOutput(out.String(), 16384))
 	}
 
@@ -163,7 +183,10 @@ func mysqlArchiveStart(ctx context.Context, workDir string, params map[string]an
 			pauseReason = "operator requested stop"
 		}
 	}
-	scanned, archived, deleted := parseArchiveStats(out.String(), deleteSource)
+	scanned, archived, deleted, statsOK := parseArchiveStats(out.String())
+	if !statsOK {
+		return nil, errors.New("pt-archiver completed without parseable row statistics; inspect data before retry")
+	}
 	return map[string]any{
 		"status":        state,
 		"scanned_rows":  scanned,
@@ -228,12 +251,12 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 		"source_database": sourceDB,
 		"source_table":    sourceTable,
 	} {
-		if !validSQLIdentifier(value) {
+		if !validArchiveIdentifier(value) {
 			return "", "", "", "", "", "", fmt.Errorf("invalid %s", name)
 		}
 	}
 	if destDB != "" || destTable != "" {
-		if !validSQLIdentifier(destDB) || !validSQLIdentifier(destTable) {
+		if !validArchiveIdentifier(destDB) || !validArchiveIdentifier(destTable) {
 			return "", "", "", "", "", "", errors.New("destination_database and destination_table must both be valid identifiers")
 		}
 	}
@@ -248,6 +271,19 @@ func archiveParams(params map[string]any) (sourceDB, sourceTable, destDB, destTa
 		return "", "", "", "", "", "", errors.New("pt_archiver_path is not an executable file")
 	}
 	return sourceDB, sourceTable, destDB, destTable, where, toolPath, nil
+}
+
+func validArchiveIdentifier(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '$' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func archiveBaseArgs(sourceDefaults, destDefaults, sourceDB, sourceTable, destDB, destTable, where string) []string {
@@ -277,7 +313,7 @@ func archiveDefaultsFile(workDir, prefix, runDir, password string) (string, func
 		return "", nil, err
 	}
 	password = strings.ReplaceAll(password, "\n", "")
-	if _, err := fmt.Fprintf(f, "[client]\nuser=root\npassword=%s\nsocket=%s/mysql.sock\n", password, runDir); err != nil {
+	if _, err := fmt.Fprintf(f, "[client]\nuser=root\npassword=%s\nsocket=%s/mysql.sock\n", mysqlOption(password), runDir); err != nil {
 		f.Close()
 		cleanup()
 		return "", nil, err
@@ -315,30 +351,47 @@ func trimOutput(v string, max int) string {
 	return v[:max]
 }
 
-func parseArchiveStats(output string, deleteSource bool) (scanned, archived, deleted int64) {
+func parseArchiveStats(output string) (scanned, archived, deleted int64, ok bool) {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "DBOPS_ROWS ") {
+		if strings.HasPrefix(line, "DBOPS_ROWS ") {
+			ok = true
+			for _, part := range strings.Fields(strings.TrimPrefix(line, "DBOPS_ROWS ")) {
+				pair := strings.SplitN(part, "=", 2)
+				if len(pair) != 2 {
+					continue
+				}
+				n, _ := strconv.ParseInt(pair[1], 10, 64)
+				switch pair[0] {
+				case "scanned":
+					scanned = n
+				case "archived":
+					archived = n
+				case "deleted":
+					deleted = n
+				}
+			}
 			continue
 		}
-		for _, part := range strings.Fields(strings.TrimPrefix(line, "DBOPS_ROWS ")) {
-			pair := strings.SplitN(part, "=", 2)
-			if len(pair) != 2 {
-				continue
-			}
-			n, _ := strconv.ParseInt(pair[1], 10, 64)
-			switch pair[0] {
-			case "scanned":
-				scanned = n
-			case "archived":
-				archived = n
-			case "deleted":
-				deleted = n
-			}
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		n, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil || n < 0 {
+			continue
+		}
+		switch fields[0] {
+		case "SELECT":
+			scanned = n
+			ok = true
+		case "INSERT":
+			archived = n
+			ok = true
+		case "DELETE":
+			deleted = n
+			ok = true
 		}
 	}
-	if deleted == 0 && deleteSource && archived > 0 {
-		deleted = archived
-	}
-	return scanned, archived, deleted
+	return scanned, archived, deleted, ok
 }

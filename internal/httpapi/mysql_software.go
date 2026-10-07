@@ -24,6 +24,12 @@ func (s *Server) uploadSoftwarePackage(c *gin.Context) {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "PAYLOAD_TOO_LARGE", "message": "package exceeds 8 GiB"})
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, (8<<30)+(1<<20))
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			_ = c.Request.MultipartForm.RemoveAll()
+		}
+	}()
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "INVALID_PARAMETER", "message": "file is required"})

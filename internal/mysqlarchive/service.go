@@ -21,15 +21,18 @@ type AgentDispatcher interface {
 }
 
 type Service struct {
-	agents      repository.AgentRepository
-	dbs         repository.DatabaseRepository
-	credentials repository.CredentialRepository
-	policies    repository.ArchivePolicyRepository
-	jobs        repository.ArchiveJobRepository
-	tasks       repository.TaskRepository
-	cipher      *security.Cipher
-	dispatcher  AgentDispatcher
+	agents       repository.AgentRepository
+	dbs          repository.DatabaseRepository
+	credentials  repository.CredentialRepository
+	policies     repository.ArchivePolicyRepository
+	jobs         repository.ArchiveJobRepository
+	tasks        repository.TaskRepository
+	cipher       *security.Cipher
+	dispatcher   AgentDispatcher
+	replications repository.MySQLReplicationRepository
 }
+
+func (s *Service) SetReplications(repo repository.MySQLReplicationRepository) { s.replications = repo }
 
 type PolicyRequest struct {
 	Name                  string `json:"name"`
@@ -66,6 +69,26 @@ type controlParams struct {
 
 type policyOptions struct {
 	PTArchiverPath string `json:"pt_archiver_path"`
+}
+
+type archiveInspection struct {
+	SourceMatching      int64  `json:"source_matching"`
+	DestinationMatching int64  `json:"destination_matching"`
+	Overlap             int64  `json:"overlap"`
+	Bounded             bool   `json:"bounded"`
+	UnionKeyDigest      string `json:"union_key_digest,omitempty"`
+	ProcessRunning      bool   `json:"process_running"`
+	ProcessCheckOK      bool   `json:"process_check_ok"`
+	Reason              string `json:"reason,omitempty"`
+}
+
+type archiveReconciliation struct {
+	Baseline    archiveInspection `json:"baseline"`
+	Current     archiveInspection `json:"current"`
+	SafeToRetry bool              `json:"safe_to_retry"`
+	Completed   bool              `json:"completed"`
+	MovedRows   int64             `json:"moved_rows"`
+	Reason      string            `json:"reason"`
 }
 
 type runtime struct {
@@ -153,6 +176,19 @@ func (s *Service) Start(ctx context.Context, policyID int64, confirmed bool) (do
 	if !p.Enabled {
 		return domain.Task{}, errors.New("archive policy is disabled")
 	}
+	if previous, err := s.jobs.List(ctx, policyID); err != nil {
+		return domain.Task{}, err
+	} else if len(previous) > 0 {
+		if previous[0].Status == "pending" || previous[0].Status == "running" || previous[0].Status == "pause_requested" {
+			return domain.Task{}, errors.New("an archive job for this policy is already active")
+		}
+		if !p.DeleteSource {
+			return domain.Task{}, errors.New("source-retaining archive cannot rerun without a durable cursor; verify destination data before creating a new policy")
+		}
+		if previous[0].BaselineJSON != "" && (previous[0].Status == "failed" || previous[0].Status == "interrupted") {
+			return domain.Task{}, errors.New("previous archive job needs reconciliation; use the verified retry action")
+		}
+	}
 	source, _, err := s.loadPolicyRuntimes(ctx, p)
 	if err != nil {
 		return domain.Task{}, err
@@ -176,11 +212,177 @@ func (s *Service) Resume(ctx context.Context, jobID int64) (domain.Task, error) 
 	if err != nil {
 		return domain.Task{}, err
 	}
+	if !p.DeleteSource {
+		return domain.Task{}, errors.New("resume without source deletion requires a durable cursor and is not supported")
+	}
 	source, _, err := s.loadPolicyRuntimes(ctx, p)
 	if err != nil {
 		return domain.Task{}, err
 	}
 	return s.createRunTask(ctx, p, source, jobID, "resume", false)
+}
+
+func (s *Service) ReconcileJob(ctx context.Context, jobID int64) (archiveReconciliation, error) {
+	job, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return archiveReconciliation{}, err
+	}
+	if job.Status != "failed" && job.Status != "interrupted" && job.Status != "stopped" {
+		return archiveReconciliation{}, errors.New("only failed, interrupted or stopped archive jobs can be reconciled")
+	}
+	if job.BaselineJSON == "" || job.EffectiveWhere == "" {
+		return archiveReconciliation{}, errors.New("this job has no durable baseline; inspect both tables manually before creating a new policy")
+	}
+	var baseline archiveInspection
+	if err := json.Unmarshal([]byte(job.BaselineJSON), &baseline); err != nil {
+		return archiveReconciliation{}, err
+	}
+	p, err := s.policies.Get(ctx, job.PolicyID)
+	if err != nil {
+		return archiveReconciliation{}, err
+	}
+	source, dest, err := s.loadPolicyRuntimes(ctx, p)
+	if err != nil {
+		return archiveReconciliation{}, err
+	}
+	current, err := s.inspect(ctx, p, source, dest, job.EffectiveWhere, job.ID)
+	if err != nil {
+		return archiveReconciliation{}, err
+	}
+	report := compareArchiveInspections(baseline, current, p.DeleteSource)
+	status := "manual_review"
+	archived, deleted := job.ArchivedRows, job.DeletedRows
+	if report.SafeToRetry {
+		status = "ready_to_retry"
+		archived, deleted = report.MovedRows, report.MovedRows
+	}
+	if report.Completed {
+		status = "verified_complete"
+		archived, deleted = report.MovedRows, report.MovedRows
+	}
+	raw, _ := json.Marshal(report)
+	if err := s.jobs.RecordReconciliation(ctx, job.ID, status, string(raw), archived, deleted); err != nil {
+		return archiveReconciliation{}, err
+	}
+	return report, nil
+}
+
+func (s *Service) RetryJob(ctx context.Context, jobID int64, confirmed bool) (domain.Task, error) {
+	if !confirmed {
+		return domain.Task{}, errors.New("verified archive retry requires confirmed=true")
+	}
+	job, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if job.Status != "failed" && job.Status != "interrupted" && job.Status != "stopped" {
+		return domain.Task{}, errors.New("archive job is not retryable")
+	}
+	if job.VerificationStatus != "ready_to_retry" {
+		return domain.Task{}, errors.New("reconcile the archive job before retrying")
+	}
+	if job.TaskID != nil {
+		task, taskErr := s.tasks.Get(ctx, *job.TaskID)
+		if taskErr != nil {
+			return domain.Task{}, taskErr
+		}
+		if task.Status == "interrupted" {
+			return domain.Task{}, errors.New("resolve the interrupted archive task before retrying")
+		}
+	}
+	report, err := s.ReconcileJob(ctx, jobID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if !report.SafeToRetry {
+		return domain.Task{}, fmt.Errorf("archive data changed after reconciliation: %s", report.Reason)
+	}
+	p, err := s.policies.Get(ctx, job.PolicyID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if !p.DeleteSource {
+		return domain.Task{}, errors.New("archive retry without source deletion is not supported")
+	}
+	all, err := s.jobs.List(ctx, job.PolicyID)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	for _, existing := range all {
+		if existing.RetryOfJobID != nil && *existing.RetryOfJobID == jobID {
+			return domain.Task{}, errors.New("retry task already exists for this archive job")
+		}
+	}
+	source, _, err := s.loadPolicyRuntimes(ctx, p)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	retry := domain.ArchiveJob{PolicyID: job.PolicyID, Status: "pending", EffectiveWhere: job.EffectiveWhere, RetryOfJobID: &jobID}
+	retry, err = s.jobs.Create(ctx, retry)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	return s.createRunTask(ctx, p, source, retry.ID, "start", true)
+}
+
+func compareArchiveInspections(baseline, current archiveInspection, deleteSource bool) archiveReconciliation {
+	r := archiveReconciliation{Baseline: baseline, Current: current, Reason: "manual review required"}
+	if !deleteSource {
+		r.Reason = "source-retaining archive has no safe retry cursor"
+		return r
+	}
+	if !baseline.Bounded || !current.Bounded || baseline.UnionKeyDigest == "" || current.UnionKeyDigest == "" {
+		r.Reason = "bounded integer-key verification unavailable"
+		return r
+	}
+	if !current.ProcessCheckOK || current.ProcessRunning {
+		r.Reason = "archive process is still running or cannot be checked"
+		return r
+	}
+	if baseline.Overlap != 0 || current.Overlap != 0 {
+		r.Reason = "source and destination contain overlapping primary keys"
+		return r
+	}
+	if baseline.UnionKeyDigest != current.UnionKeyDigest {
+		r.Reason = "matching primary-key set changed since the baseline"
+		return r
+	}
+	moved := baseline.SourceMatching - current.SourceMatching
+	if moved < 0 || current.DestinationMatching-baseline.DestinationMatching != moved {
+		r.Reason = "source and destination row deltas do not match"
+		return r
+	}
+	if current.SourceMatching == 0 {
+		r.Completed, r.MovedRows, r.Reason = true, moved, "all matching source rows were already archived"
+		return r
+	}
+	r.SafeToRetry, r.MovedRows, r.Reason = true, moved, "primary-key set conserved, no overlap, archive process stopped"
+	return r
+}
+
+func archiveResultVerified(report archiveReconciliation, jobState string) bool {
+	return report.Completed || (jobState != "success" && report.SafeToRetry)
+}
+
+func (s *Service) inspect(ctx context.Context, p domain.ArchivePolicy, source runtime, dest *runtime, where string, jobID int64) (archiveInspection, error) {
+	params, err := s.actionParams(p, source, dest, where, jobID)
+	if err != nil {
+		return archiveInspection{}, err
+	}
+	policy, _ := actionpolicy.Get("mysql.archive.inspect")
+	resp, err := s.dispatcher.Dispatch(ctx, source.Agent.ID, agentproto.ActionRequest{TaskID: 0, Action: "mysql.archive.inspect", Risk: string(policy.Risk), ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 600, Params: params})
+	if err != nil {
+		return archiveInspection{}, err
+	}
+	raw, err := json.Marshal(resp.Result)
+	if err != nil {
+		return archiveInspection{}, err
+	}
+	var out archiveInspection
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return archiveInspection{}, err
+	}
+	return out, nil
 }
 
 func (s *Service) Control(ctx context.Context, jobID int64, action string, confirmed bool) (domain.Task, error) {
@@ -270,9 +472,12 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 			}
 		}
 
-		where, err := materializeWhere(p)
-		if err != nil {
-			return nil, err
+		where := job.EffectiveWhere
+		if where == "" {
+			where, err = materializeWhere(p)
+			if err != nil {
+				return nil, err
+			}
 		}
 		actionParams, err := s.actionParams(p, source, dest, where, job.ID)
 		if err != nil {
@@ -303,16 +508,72 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 			TaskID: t.ID, StepNo: 1, StepCode: "ARCHIVE_PRECHECK", StepName: "Archive precheck and dry-run",
 			Status: "success", Progress: 20, OutputJSON: security.RedactJSON(string(prePayload)), RecoveryPolicy: "verify_before_retry",
 		})
+		if job.BaselineJSON == "" && p.DeleteSource {
+			baseline, inspectErr := s.inspect(ctx, p, source, dest, where, 0)
+			if inspectErr != nil {
+				_ = s.jobs.UpdateState(ctx, job.ID, "failed", 0, 0, 0, 0, 0, "", "", inspectErr.Error())
+				return nil, inspectErr
+			}
+			if baseline.Bounded && baseline.Overlap != 0 {
+				inspectErr = errors.New("source and destination already overlap; archive requires manual review")
+				_ = s.jobs.UpdateState(ctx, job.ID, "failed", 0, 0, 0, 0, 0, "", "", inspectErr.Error())
+				return nil, inspectErr
+			}
+			raw, _ := json.Marshal(baseline)
+			if err := s.jobs.SetBaseline(ctx, job.ID, where, string(raw)); err != nil {
+				return nil, err
+			}
+			job.BaselineJSON, job.EffectiveWhere = string(raw), where
+		}
+		lagProbe, err := s.archiveLagProbe(ctx, p)
+		if err == nil && lagProbe != nil {
+			probeCtx, stop := context.WithTimeout(ctx, 15*time.Second)
+			err = lagProbe(probeCtx)
+			stop()
+		}
+		if err != nil {
+			_ = s.jobs.UpdateState(ctx, job.ID, "failed", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
+			return nil, fmt.Errorf("archive replication protection: %w", err)
+		}
 
 		_ = s.jobs.UpdateState(ctx, job.ID, "running", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, "", "")
 		startPolicy, _ := actionpolicy.Get("mysql.archive.start")
 		confirmed := tp.Confirmed || tp.Mode == "resume"
+		monitorCtx, cancelMonitor := context.WithCancel(ctx)
+		lagFailures := make(chan error, 1)
+		monitorDone := make(chan struct{})
+		stopArchiver := func(stopCtx context.Context) error {
+			_, stopErr := s.dispatcher.Dispatch(stopCtx, source.Agent.ID, agentproto.ActionRequest{
+				TaskID: 0, Action: "mysql.archive.stop", Risk: "R3", Confirmed: true,
+				ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 15,
+				Params: map[string]any{"archive_job_id": job.ID},
+			})
+			return stopErr
+		}
+		go func() {
+			defer close(monitorDone)
+			watchArchiveLag(monitorCtx, lagProbe, stopArchiver, lagFailures)
+		}()
 		resp, err := s.dispatcher.Dispatch(ctx, source.Agent.ID, agentproto.ActionRequest{
 			TaskID: 0, Action: "mysql.archive.start", Risk: string(startPolicy.Risk), Confirmed: confirmed,
 			ProtocolVersion: agentproto.ProtocolVersion, TimeoutSeconds: 86400, Params: actionParams,
 		})
+		cancelMonitor()
+		<-monitorDone
+		select {
+		case monitorErr := <-lagFailures:
+			err = fmt.Errorf("archive stopped by replication protection: %w", monitorErr)
+		default:
+		}
 		if err != nil {
-			_ = s.jobs.UpdateState(ctx, job.ID, "failed", job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
+			scanned, archived, deleted, failed := job.ScannedRows, job.ArchivedRows, job.DeletedRows, job.FailedRows
+			if partial, ok := resp.Result.(map[string]any); ok {
+				scanned += number(partial["scanned_rows"])
+				archived += number(partial["archived_rows"])
+				deleted += number(partial["deleted_rows"])
+				failed += number(partial["failed_rows"])
+			}
+			_ = s.jobs.UpdateState(ctx, job.ID, "failed", scanned, archived, deleted, failed, job.SpeedRowsSec, job.LastProcessedKey, job.PauseReason, err.Error())
 			_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 				TaskID: t.ID, StepNo: 2, StepCode: "PT_ARCHIVER", StepName: "Run pt-archiver",
 				Status: "failed", Progress: 70, ErrorMessage: err.Error(), RecoveryPolicy: "manual_on_unknown",
@@ -344,6 +605,27 @@ func (s *Service) RunHandler() func(context.Context, domain.Task) (any, error) {
 		}
 		if err := s.jobs.UpdateState(ctx, job.ID, jobState, scanned, archived, deleted, failed, 0, "", pauseReason, ""); err != nil {
 			return nil, err
+		}
+		var baseline archiveInspection
+		if json.Unmarshal([]byte(job.BaselineJSON), &baseline) == nil {
+			current, inspectErr := s.inspect(ctx, p, source, dest, where, job.ID)
+			if inspectErr != nil {
+				_ = s.jobs.RecordReconciliation(ctx, job.ID, "manual_review", fmt.Sprintf(`{"reason":%q}`, inspectErr.Error()), archived, deleted)
+			} else {
+				report := compareArchiveInspections(baseline, current, p.DeleteSource)
+				raw, _ := json.Marshal(report)
+				verification := "manual_review"
+				if archiveResultVerified(report, jobState) {
+					verification = "verified"
+				}
+				_ = s.jobs.RecordReconciliation(ctx, job.ID, verification, string(raw), archived, deleted)
+				if !archiveResultVerified(report, jobState) && baseline.Bounded && current.Bounded && p.DeleteSource {
+					err = fmt.Errorf("archive result requires manual review: %s", report.Reason)
+					_ = s.jobs.UpdateState(ctx, job.ID, "failed", scanned, archived, deleted, failed, 0, "", pauseReason, err.Error())
+					_ = s.jobs.RecordReconciliation(ctx, job.ID, "manual_review", string(raw), archived, deleted)
+					return nil, err
+				}
+			}
 		}
 		_ = s.tasks.UpsertStep(ctx, domain.TaskStep{
 			TaskID: t.ID, StepNo: 2, StepCode: "PT_ARCHIVER", StepName: "Run pt-archiver",
@@ -450,8 +732,8 @@ func (s *Service) normalizePolicy(ctx context.Context, req PolicyRequest) (domai
 	if req.SleepMS < 0 {
 		return domain.ArchivePolicy{}, errors.New("sleep_ms cannot be negative")
 	}
-	if req.MaxReplicationLag <= 0 {
-		req.MaxReplicationLag = 30
+	if req.MaxReplicationLag < 0 || req.MaxThreadsRunning < 0 {
+		return domain.ArchivePolicy{}, errors.New("load protection thresholds cannot be negative")
 	}
 	if req.PTArchiverPath == "" || !filepath.IsAbs(req.PTArchiverPath) || filepath.Clean(req.PTArchiverPath) == "/" {
 		return domain.ArchivePolicy{}, errors.New("pt_archiver_path must be an absolute path")

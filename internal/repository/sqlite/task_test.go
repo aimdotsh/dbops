@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,6 +42,19 @@ CREATE TABLE tasks (
   lease_owner TEXT,
   lease_expires_at TEXT,
   recovery_policy TEXT NOT NULL
+);
+CREATE TABLE backup_jobs (
+ id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT, error_message TEXT
+);
+CREATE TABLE archive_jobs (
+ id INTEGER PRIMARY KEY, task_id INTEGER, status TEXT, finished_at TEXT,
+ verification_status TEXT, error_message TEXT
+);
+CREATE TABLE task_steps (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, task_id INTEGER NOT NULL, step_no INTEGER NOT NULL,
+ step_code TEXT NOT NULL, step_name TEXT, status TEXT NOT NULL, progress INTEGER NOT NULL,
+ started_at TEXT, finished_at TEXT, output_json TEXT, error_message TEXT, recovery_policy TEXT,
+ UNIQUE(task_id,step_no)
 );`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)
@@ -85,5 +99,122 @@ func TestClaimAndRecover(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("expected one recovered task, got %d", n)
+	}
+}
+
+func TestLeaseOwnershipAndAgentSerialization(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	repo := TaskRepo{DB: db}
+	ctx := context.Background()
+	agent := int64(3)
+	first, err := repo.Create(ctx, domain.Task{TaskType: "mysql.install", AgentID: &agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.Create(ctx, domain.Task{TaskType: "mysql.backup", AgentID: &agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimNext(ctx, "one", 60)
+	if err != nil || claimed == nil || claimed.ID != first.ID {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if next, err := repo.ClaimNext(ctx, "two", 60); err != nil || next != nil {
+		t.Fatalf("concurrent same-agent operation: %v %v", next, err)
+	}
+	control, err := repo.Create(ctx, domain.Task{TaskType: "mysql.archive.control", AgentID: &agent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "control", 60); err != nil || next == nil || next.ID != control.ID {
+		t.Fatalf("control lane blocked: %v %v", next, err)
+	}
+	if err = repo.RenewLease(ctx, first.ID, "wrong-owner", 60); err == nil {
+		t.Fatal("wrong owner renewed lease")
+	}
+	if err = repo.RenewLease(ctx, first.ID, "one", 60); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.FinishOwned(ctx, first.ID, "wrong-owner", "success", "{}", ""); err == nil {
+		t.Fatal("wrong owner completed task")
+	}
+	if err = repo.FinishOwned(ctx, first.ID, "one", "success", "{}", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.RenewLease(ctx, first.ID, "one", 60); err == nil {
+		t.Fatal("terminal task resurrected")
+	}
+}
+
+func TestNewHostRestoreLocksBothHostsUntilInterruptedReview(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	repo := TaskRepo{DB: db}
+	ctx := context.Background()
+	source, target := int64(1), int64(2)
+	job, err := repo.Create(ctx, domain.Task{TaskType: "mysql.restore_new", AgentID: &target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := repo.ClaimNext(ctx, "restore", 60); err != nil || claimed == nil || claimed.ID != job.ID {
+		t.Fatal(claimed, err)
+	}
+	if _, err := repo.Create(ctx, domain.Task{TaskType: "mysql.backup", AgentID: &source}); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next != nil {
+		t.Fatal("source not locked", next, err)
+	}
+	if err := repo.UpdateStatus(ctx, job.ID, "interrupted", 0, "{}", "review required"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next != nil {
+		t.Fatal("interrupted restore not locked", next, err)
+	}
+	if err := repo.UpdateStatus(ctx, job.ID, "cancelled", 0, "{}", "reviewed"); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repo.ClaimNext(ctx, "other", 60); err != nil || next == nil {
+		t.Fatal("review did not release lock", next, err)
+	}
+}
+
+func TestFailedTaskClosesRunningStepAndRedactsSignedURL(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+	repo := TaskRepo{DB: db}
+	ctx := context.Background()
+	job, err := repo.Create(ctx, domain.Task{TaskType: "mysql.install"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repo.ClaimNext(ctx, "worker", 60)
+	if err != nil || claimed == nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertStep(ctx, domain.TaskStep{TaskID: job.ID, StepNo: 1, StepCode: "DOWNLOAD_PACKAGE", Status: "running", Progress: 32}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateProgress(ctx, job.ID, 100); err != nil {
+		t.Fatal(err)
+	}
+	message := "download failed: https://example.test/pkg?expires=123&sig=secret-value"
+	if err := repo.FinishOwned(ctx, job.ID, "worker", "failed", "{}", message); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := repo.Get(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Status != "failed" || finished.Progress != 99 || finished.ErrorMessage == nil || strings.Contains(*finished.ErrorMessage, "secret-value") {
+		t.Fatalf("invalid terminal task: %+v", finished)
+	}
+	steps, err := repo.ListSteps(ctx, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(steps) != 1 || steps[0].Status != "failed" || steps[0].FinishedAt == nil || strings.Contains(steps[0].ErrorMessage, "secret-value") {
+		t.Fatalf("running step not closed safely: %+v", steps)
 	}
 }
