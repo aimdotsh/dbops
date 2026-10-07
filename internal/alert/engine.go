@@ -97,10 +97,38 @@ func (e *Engine) EvaluateOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	rows, err := e.db.QueryContext(ctx, "SELECT DISTINCT host_id FROM agents WHERE host_id IS NOT NULL")
+	if err != nil {
+		return err
+	}
+	managedHosts := map[int64]bool{}
+	for rows.Next() {
+		var hostID int64
+		if err := rows.Scan(&hostID); err != nil {
+			rows.Close()
+			return err
+		}
+		managedHosts[hostID] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
 	now := time.Now().UTC()
 	active := map[string]bool{}
 
 	for _, snap := range snaps {
+		if !managedHosts[snap.ResourceID] {
+			for _, rule := range e.rules {
+				fingerprint := fmt.Sprintf("%s:host:%d", rule.Name, snap.ResourceID)
+				e.clearDuration(fingerprint)
+				if err := e.resolve(ctx, fingerprint, now); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		for _, rule := range e.rules {
 			value, ok := metricValue(rule.Metric, snap, now)
 			if !ok {

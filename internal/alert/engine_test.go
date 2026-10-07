@@ -37,6 +37,8 @@ CREATE TABLE alert_events (
   resolved_at TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE agents(host_id INTEGER);
+INSERT INTO agents(host_id) VALUES(1);
 `); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +89,22 @@ CREATE TABLE metric_rollups_1d(resource_type TEXT,resource_id INTEGER,bucket_ts 
 	if len(resolved) != 1 {
 		t.Fatalf("expected resolved heartbeat alert, got %+v", resolved)
 	}
+	if err := store.Put(ctx, "host", 1, time.Now().UTC().Add(-2*time.Minute), map[string]any{"root_used_pct": 95.0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.EvaluateOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := meta.Exec("DELETE FROM agents WHERE host_id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.EvaluateOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	firing, err := engine.List(ctx, "FIRING", 100)
+	if err != nil || len(firing) != 0 {
+		t.Fatalf("orphaned host metrics should resolve active alerts: %+v %v", firing, err)
+	}
 }
 
 func TestAgentUnreachableResolvesDatabaseDownAlert(t *testing.T) {
@@ -100,7 +118,7 @@ func TestAgentUnreachableResolvesDatabaseDownAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer metricsDB.Close()
-	if _, err := meta.Exec(`CREATE TABLE alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,resource_type TEXT,resource_id INTEGER,fingerprint TEXT,status TEXT,severity TEXT,message TEXT,started_at TEXT,last_seen_at TEXT,resolved_at TEXT,metadata_json TEXT);`); err != nil {
+	if _, err := meta.Exec(`CREATE TABLE alert_events(id INTEGER PRIMARY KEY AUTOINCREMENT,resource_type TEXT,resource_id INTEGER,fingerprint TEXT,status TEXT,severity TEXT,message TEXT,started_at TEXT,last_seen_at TEXT,resolved_at TEXT,metadata_json TEXT);CREATE TABLE agents(host_id INTEGER);`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := metricsDB.Exec(`CREATE TABLE metric_latest(resource_type TEXT,resource_id INTEGER,collected_at TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id));CREATE TABLE metric_snapshots_5m(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;CREATE TABLE metric_rollups_1h(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;CREATE TABLE metric_rollups_1d(resource_type TEXT,resource_id INTEGER,bucket_ts TEXT,payload_json TEXT,PRIMARY KEY(resource_type,resource_id,bucket_ts)) WITHOUT ROWID;`); err != nil {
