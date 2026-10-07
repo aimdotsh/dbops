@@ -12,7 +12,7 @@ let timer:ReturnType<typeof setTimeout>
 let disposed=false
 const tasks = ref<any[]>([])
 const statusFilter=ref(String(route.query.status||'all').toLowerCase()),search=ref(''),page=ref(1),pageSize=15
-const filteredTasks=computed(()=>tasks.value.filter(task=>(statusFilter.value==='all'||(statusFilter.value==='active'?['queued','running'].includes(String(task.status).toLowerCase()):String(task.status).toLowerCase()===statusFilter.value))&&(!search.value||`${task.id} ${task.task_type} ${task.error_message||''}`.toLowerCase().includes(search.value.toLowerCase()))))
+const filteredTasks=computed(()=>tasks.value.filter(task=>(statusFilter.value==='all'||(statusFilter.value==='active'?['queued','running'].includes(String(task.status).toLowerCase()):String(task.status).toLowerCase()===statusFilter.value))&&(!search.value||`${task.id} ${task.task_type} ${task.error_message||''} ${errorSummary(task.error_message)}`.toLowerCase().includes(search.value.toLowerCase()))))
 const pagedTasks=computed(()=>filteredTasks.value.slice((page.value-1)*pageSize,page.value*pageSize))
 const selected = ref<any | null>(null)
 const drawer = ref(false)
@@ -26,6 +26,13 @@ const statusName=(value:string)=>statusNames[value]||value
 const stepName=(row:any)=>stepNames[row.step_code]||row.step_name||row.step_code
 const progressText=(task:any)=>!task?'—':task.status==='success'?'100%':['failed','interrupted','cancelled','timeout'].includes(task.status)?'未完成':`${task.progress}%`
 const targetName=(value:string)=>({database:'数据库',host:'主机',agent:'Agent',archive_job:'归档作业'} as Record<string,string>)[value]||value
+function errorSummary(value:string){
+ if(!value)return ''
+ if(/manually reconciled; no automatic retry/i.test(value))return '已人工核查并释放，不会自动重试'
+ if(/agent disconnected|agent .*unreachable|connection ended/i.test(value))return 'Agent 连接中断，请核查主机和任务现场'
+ if(/archive result requires manual review: all matching source rows were already archived/i.test(value))return '归档结果需人工核查：符合条件的源记录已全部归档'
+ return value
+}
 const resultText=computed(()=>{try{return JSON.stringify(JSON.parse(selected.value?.result_json||'{}'),null,2)}catch{return selected.value?.result_json||''}})
 
 async function load() { try {tasks.value = (await getData<any[]>('/tasks'))??[];error.value='';if(drawer.value&&selected.value)await open({id:selected.value.id})}catch(e:any){error.value=e.response?.data?.message||e.message} }
@@ -51,18 +58,21 @@ onUnmounted(()=>{disposed=true;clearTimeout(timer)})
     <el-alert v-if="error" :title="error" type="error" />
     <div class="filter-row"><el-select v-model="statusFilter" style="width:170px"><el-option label="全部任务" value="all"/><el-option label="排队与执行中" value="active"/><el-option label="成功" value="success"/><el-option label="失败" value="failed"/><el-option label="待人工核查" value="interrupted"/></el-select><el-input v-model="search" clearable placeholder="搜索任务 ID、类型或错误" style="width:270px"/><span class="muted">共 {{filteredTasks.length}} 个任务</span></div>
     <el-card shadow="never">
-      <el-table :data="pagedTasks" @row-click="open">
+      <el-table class="task-table" :data="pagedTasks" @row-click="open">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="任务类型" min-width="210"><template #default="{row}">{{taskName(row.task_type)}}</template></el-table-column>
         <el-table-column label="目标" width="110"><template #default="{row}">{{targetName(row.target_type)}} {{row.target_id?`#${row.target_id}`:''}}</template></el-table-column>
         <el-table-column label="状态" width="125"><template #default="{row}"><el-tag :type="row.status==='success'?'success':row.status==='failed'?'danger':'warning'">{{statusName(row.status)}}</el-tag></template></el-table-column>
         <el-table-column label="进度" width="100"><template #default="{row}">{{progressText(row)}}</template></el-table-column>
-        <el-table-column prop="error_message" label="错误" min-width="260" show-overflow-tooltip />
-      </el-table><el-pagination v-if="filteredTasks.length>pageSize" v-model:current-page="page" :page-size="pageSize" :total="filteredTasks.length" layout="prev, pager, next" style="margin-top:18px;justify-content:flex-end"/>
+        <el-table-column label="错误" min-width="260" show-overflow-tooltip><template #default="{row}"><span :title="row.error_message">{{errorSummary(row.error_message)}}</span></template></el-table-column>
+      </el-table>
+      <div class="task-cards"><article v-for="row in pagedTasks" :key="row.id" class="task-card"><div class="task-card-head"><strong>任务 #{{row.id}}</strong><el-tag :type="row.status==='success'?'success':row.status==='failed'?'danger':'warning'">{{statusName(row.status)}}</el-tag></div><h3>{{taskName(row.task_type)}}</h3><p>{{targetName(row.target_type)}} {{row.target_id?`#${row.target_id}`:''}} · 进度 {{progressText(row)}}</p><p v-if="row.error_message" class="task-card-error">{{errorSummary(row.error_message)}}</p><el-button link type="primary" @click="open(row)">查看详情</el-button></article></div>
+      <el-pagination v-if="filteredTasks.length>pageSize" v-model:current-page="page" :page-size="pageSize" :total="filteredTasks.length" layout="prev, pager, next" style="margin-top:18px;justify-content:flex-end"/>
     </el-card>
 
     <el-drawer v-model="drawer" size="min(820px, 100%)" :title="selected ? `任务 #${selected.id} · ${taskName(selected.task_type)}` : '任务详情'">
-      <el-alert v-if="selected?.error_message" :title="selected.error_message" type="error" :closable="false"/>
+      <el-alert v-if="selected?.error_message" :title="errorSummary(selected.error_message)" type="error" :closable="false"/>
+      <details v-if="selected?.error_message" class="raw-error"><summary>查看原始错误</summary><code>{{selected.error_message}}</code></details>
       <p>状态：{{statusName(selected?.status)}} · 进度：{{progressText(selected)}}</p>
       <el-button v-if="selected?.status==='interrupted'&&auth.user?.roles?.some(r=>['SuperAdmin','DBA'].includes(r))" type="warning" @click="resolve">已人工核查，释放中断任务</el-button>
       <h3>执行步骤</h3>
@@ -83,3 +93,17 @@ onUnmounted(()=>{disposed=true;clearTimeout(timer)})
     </el-drawer>
   </div>
 </template>
+<style scoped>
+.task-cards{display:none}
+.raw-error{margin-top:8px;font-size:12px;color:#667085}
+.raw-error code{display:block;margin-top:6px;overflow-wrap:anywhere}
+@media(max-width:768px){
+ .task-table{display:none}
+ .task-cards{display:grid;gap:12px}
+ .task-card{border:1px solid #e7ebf0;border-radius:10px;padding:14px;min-width:0}
+ .task-card-head{display:flex;align-items:center;justify-content:space-between}
+ .task-card h3{font-size:15px;margin:10px 0 6px}
+ .task-card p{font-size:13px;color:#667085;margin:6px 0;overflow-wrap:anywhere}
+ .task-card .task-card-error{color:#b42318}
+}
+</style>

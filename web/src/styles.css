@@ -217,7 +217,10 @@ body { margin: 0; min-width: 1024px; background: #f5f7fa; }
  .topbar-title span,.topbar-title i,.user-area>.header-action,.user-area>.el-button,.user-area>.el-tag,.user-avatar{display:none}
  .content{padding:16px}
  .page-title{gap:12px}
+ .page-title,.page-actions{flex-wrap:wrap}
  .page-title h2{font-size:20px}
  .page-title p{font-size:12px}
  .filter-row{flex-wrap:wrap}
+ .asset-summary,.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .two-col,.operation-layout,.form-grid{grid-template-columns:1fr}
 }
