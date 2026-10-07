@@ -12,6 +12,7 @@
 body { margin: 0; min-width: 1024px; background: #f5f7fa; }
 .shell { min-height: 100vh; }
 .sidebar { background: var(--nav); color: white; display: flex; flex-direction: column; box-shadow: 4px 0 18px rgba(16,24,40,.08); }
+.sidebar-backdrop,.mobile-menu-button { display:none!important; }
 .brand { height: 72px; display: flex; gap: 12px; align-items: center; padding: 0 22px; border-bottom: 1px solid rgba(255,255,255,.08); }
 .brand-mark { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; background: linear-gradient(145deg,#21a994,#6bd4c1); box-shadow: 0 8px 20px rgba(39,173,154,.22); }
 .brand strong,.brand small { display: block; }
@@ -204,3 +205,19 @@ body { margin: 0; min-width: 1024px; background: #f5f7fa; }
 .login-panel p { margin:0 0 28px; color:var(--muted); }
 .login-brand { display:inline-block; padding:9px 12px; color:white; background:#155eef; border-radius:9px; font-weight:800; letter-spacing:.5px; }
 @media(max-width:1180px){.metric-grid{grid-template-columns:repeat(3,1fr)}.operation-layout{grid-template-columns:310px minmax(0,1fr)}.content{padding:22px}.user-copy,.global-search{display:none}.service-context{margin:-22px -22px 0}.detail-subnav{margin:0 -22px 14px}.property-grid{column-gap:20px}.property-grid>div{grid-template-columns:90px minmax(0,1fr)}}
+@media(max-width:768px){
+ body{min-width:0}
+ .shell>.el-container{min-width:0}
+ .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:101;width:256px!important;transform:translateX(-100%);transition:transform .2s ease}
+ .sidebar.mobile-open{transform:translateX(0)}
+ .sidebar-backdrop{display:block!important;position:fixed;inset:0;z-index:100;background:rgba(16,24,40,.48)}
+ .mobile-menu-button{display:inline-flex!important}
+ .topbar{padding:0 14px}
+ .topbar-left{gap:8px}
+ .topbar-title span,.topbar-title i,.user-area>.header-action,.user-area>.el-button,.user-area>.el-tag,.user-avatar{display:none}
+ .content{padding:16px}
+ .page-title{gap:12px}
+ .page-title h2{font-size:20px}
+ .page-title p{font-size:12px}
+ .filter-row{flex-wrap:wrap}
+}

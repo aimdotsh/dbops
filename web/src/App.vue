@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, Box, Coin, Collection, DataAnalysis, Grid, Monitor, Operation, Search, Setting, Tickets, UserFilled } from '@element-plus/icons-vue'
+import { Bell, Box, Coin, Collection, DataAnalysis, Grid, Menu, Monitor, Operation, Search, Setting, Tickets, UserFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const globalSearch = ref('')
+const sidebarOpen = ref(false)
 const loginPage = computed(() => route.path === '/login')
 const activeMenu = computed(() => {
   if (route.path.startsWith('/databases/')) return '/assets'
@@ -26,6 +27,7 @@ function searchResources(value: string) {
 }
 
 onMounted(() => auth.loadMe().catch(() => undefined))
+watch(() => route.fullPath, () => { sidebarOpen.value = false })
 
 function logout() {
   auth.logout()
@@ -36,7 +38,8 @@ function logout() {
 <template>
   <router-view v-if="loginPage" />
   <el-container v-else class="shell">
-    <el-aside width="256px" class="sidebar">
+    <div v-if="sidebarOpen" class="sidebar-backdrop" @click="sidebarOpen=false" />
+    <el-aside width="256px" class="sidebar" :class="{'mobile-open':sidebarOpen}">
       <div class="brand">
         <div class="brand-mark">DB</div>
         <div><strong>DBOps</strong><small>Database Cloud Console</small></div>
@@ -72,6 +75,7 @@ function logout() {
     <el-container>
       <el-header class="topbar">
         <div class="topbar-left">
+          <el-button class="mobile-menu-button" text :icon="Menu" aria-label="打开导航" @click="sidebarOpen=true" />
           <div class="topbar-title"><span>DBOps</span><i>/</i><strong>{{ pageName }}</strong></div>
           <el-input v-model="globalSearch" class="global-search" placeholder="搜索数据库、主机或任务" clearable @keyup.enter="searchResources(globalSearch)"><template #prefix><el-icon><Search /></el-icon></template></el-input>
         </div>
